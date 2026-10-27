@@ -23,7 +23,7 @@ if (!SB || !KEY) {
   catch (e) { ENVERR = 'A chave do Supabase ainda não está no arquivo do workflow (troque ' + 'COLE_AQUI_A_' + 'SERVICE_ROLE_KEY) e o n8n bloqueia variáveis de ambiente (N8N_BLOCK_ENV_ACCESS_IN_NODE=false resolve, ou use o script subir-n8n).'; }
 }
 const MISSING = ENVERR || 'Falta configurar o Supabase: troque ' + 'COLE_AQUI_A_URL' + '_DO_SUPABASE e COLE_AQUI_A_' + 'SERVICE_ROLE_KEY no arquivo do workflow (ou defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nas variáveis do n8n).';
-const hostOfUrl = (u) => { try { return new URL(u).host; } catch (e) { return ''; } };
+const hostOfUrl = (u) => { try { return parseUrl(u).host; } catch (e) { return ''; } };
 const envNum = (k, d, min, max) => { try { const v = Number($env[k]); return Number.isFinite(v) && v >= min && v <= max ? Math.floor(v) : d; } catch (e) { return d; } };
 // Limites de segurança (mude pelas variáveis CENTRAL_* do n8n; sem elas valem estes padrões)
 const SEG = {
@@ -47,12 +47,12 @@ const lockTake = (key, ttlMs) => { if (!STORE) return true; const now = Date.now
 const lockFree = (key) => { if (STORE && STORE.mx) delete STORE.mx[key]; };
 const keyRole = () => { try { const p = JSON.parse(Buffer.from(KEY.split('.')[1], 'base64').toString('utf8')); return String(p.role || 'desconhecido'); } catch (e) { return 'desconhecido'; } };
 // Saída: só http/https e nunca para metadados de nuvem (anti-SSRF). Redirecionamento já é recusado.
-const assertOut = (u) => { let x; try { x = new URL(u); } catch (e) { throw new Error('Endereço inválido'); } if (!/^https?:$/.test(x.protocol)) throw new Error('Protocolo não permitido'); if (/^(169\\.254\\.|0\\.0\\.0\\.0|metadata\\.|\\[?fe80:)/i.test(x.hostname) || /^metadata\\.google\\.internal$/i.test(x.hostname)) throw new Error('Endereço bloqueado por segurança'); };
+const assertOut = (u) => { const x = parseUrl(u); if (!/^https?:$/.test(x.protocol)) throw new Error('Protocolo não permitido'); if (/^(169\\.254\\.|0\\.0\\.0\\.0|metadata\\.|\\[?fe80:)/i.test(x.hostname) || /^metadata\\.google\\.internal$/i.test(x.hostname)) throw new Error('Endereço bloqueado por segurança'); };
 const helpers = this.helpers;
 const http = async (o) => {
   assertOut(o.url);
   const headers = { ...(o.headers || {}) }; let body = o.body;
-  if (o.form) { headers['content-type'] = 'application/x-www-form-urlencoded'; body = new URLSearchParams(o.form).toString(); }
+  if (o.form) { headers['content-type'] = 'application/x-www-form-urlencoded'; body = Object.keys(o.form).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(String(o.form[k]))).join('&'); }
   else if (o.json !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(o.json); }
   try {
     const r = await helpers.httpRequest({ method: o.method, url: o.url, headers, body, json: false, returnFullResponse: true, ignoreHttpStatusErrors: true, timeout: o.timeoutMs || 20000, redirect: 'error' });

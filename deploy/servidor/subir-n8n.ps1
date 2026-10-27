@@ -18,7 +18,7 @@ if ($payload.Count -ge 2) {
 }
 $json = [IO.File]::ReadAllText($arq, [Text.Encoding]::UTF8)
 $json = $json.Replace("COLE_AQUI_A_URL_DO_SUPABASE", $SupabaseUrl.TrimEnd("/")).Replace("COLE_AQUI_A_SERVICE_ROLE_KEY", $key)
-if ($json -notmatch '"id"\s*:\s*"') { $json = [regex]::Replace($json, '^\s*\{', "{`n  `"id`": `"$WorkflowId`",", 1) }
+$json = [regex]::Replace($json, '^\s*\{', "{`n  `"id`": `"$WorkflowId`",", 1)
 $tmp = Join-Path $env:TEMP "central-n8n.json"
 [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
 try {
@@ -27,10 +27,13 @@ try {
   $remoto = @'
 C=__C__; ID=__ID__
 chmod 600 /tmp/central-n8n.json
+docker exec -u root $C rm -f /tmp/central-n8n.json
 docker cp /tmp/central-n8n.json $C:/tmp/central-n8n.json
 rm -f /tmp/central-n8n.json
+docker exec -u root $C chown node:node /tmp/central-n8n.json
+docker exec -u root $C chmod 600 /tmp/central-n8n.json
 docker exec $C n8n import:workflow --input=/tmp/central-n8n.json 2>&1 | tail -3
-docker exec $C sh -c 'rm -f /tmp/central-n8n.json'
+docker exec -u root $C rm -f /tmp/central-n8n.json
 docker exec $C n8n publish:workflow --id=$ID 2>&1 | tail -2 || true
 docker exec $C n8n update:workflow --id=$ID --active=true 2>&1 | tail -2 || true
 docker restart $C >/dev/null && echo "n8n reiniciado"

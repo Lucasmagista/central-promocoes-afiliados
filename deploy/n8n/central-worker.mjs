@@ -249,8 +249,10 @@ async function evolutionStatus(ctx, rt) {
 }
 
 /* ------------------------------------------------------------------ n8n: autoteste e diagnósticos */
-const hostOf = (u) => { try { return new URL(u).host; } catch { return ''; } };
-const maskUrl = (u) => { try { const x = new URL(u); const p = x.pathname.split('/').filter(Boolean); const last = p.pop() || ''; return `${x.host}/…/${last.slice(0, 8)}…`; } catch { return ''; } };
+// Leitor de endereço sem depender de `URL` (o ambiente isolado do n8n 2.x não oferece essa classe).
+const parseUrl = (u) => { const m = /^(https?:)\/\/(?:[^\/?#\s@]*@)?(\[[^\]]+\]|[^\/?#\s:]+)(:\d+)?([^?#]*)/i.exec(String(u == null ? '' : u).trim()); if (!m) throw new Error('Endereço inválido'); const hostname = m[2].toLowerCase(); return { protocol: m[1].toLowerCase(), hostname, host: hostname + (m[3] || ''), pathname: m[4] || '/' }; };
+const hostOf = (u) => { try { return parseUrl(u).host; } catch { return ''; } };
+const maskUrl = (u) => { try { const x = parseUrl(u); const p = x.pathname.split('/').filter(Boolean); const last = p.pop() || ''; return `${x.host}/…/${last.slice(0, 8)}…`; } catch { return ''; } };
 // Confere o que o n8n precisa para trabalhar. Nunca devolve segredo: só "sim/não" e nomes de servidor.
 export async function selfTest(ctx, rt) {
   const t0 = ctx.now().getTime(); const checks = []; const add = (id, label, ok, detail, required = true) => checks.push({ id, label, ok: !!ok, detail: String(detail || ''), required });
@@ -269,7 +271,7 @@ export async function selfTest(ctx, rt) {
   add('service_role', 'Chave do Supabase é a service_role', !env.key_role || env.key_role === 'service_role' || env.key_role === 'desconhecido', env.key_role === 'anon' ? 'Esta é a chave ANON: as tarefas vão falhar. Use a service_role.' : env.key_role ? `Papel da chave: ${env.key_role}` : '—', true);
   const https = (u) => !u || /^https:\/\//i.test(u);
   add('https', 'Endereços usam HTTPS', https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url), https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url) ? 'Tudo em HTTPS' : 'Há endereço sem HTTPS: a chave e as mensagens viajam sem proteção.', false);
-  const lastSeg = (u) => { try { return new URL(u).pathname.split('/').filter(Boolean).pop() || ''; } catch { return ''; } };
+  const lastSeg = (u) => { try { return parseUrl(u).pathname.split('/').filter(Boolean).pop() || ''; } catch { return ''; } };
   const weak = [ev.webhook_url, tg.webhook_url].filter(Boolean).filter((u) => lastSeg(u).length < 20);
   add('hook_secret_path', 'Caminho dos webhooks é secreto', weak.length === 0, weak.length ? 'Algum caminho é curto/previsível. Use o caminho aleatório do arquivo importado.' : 'Caminhos longos e aleatórios', false);
   add('tg_secret', 'Segredo do webhook do Telegram é forte', tg.mode !== 'webhook' || (sec.telegram_webhook_secret || '').length >= 32, tg.mode !== 'webhook' ? 'Não usado (modo polling)' : (sec.telegram_webhook_secret || '').length >= 32 ? 'Forte' : 'Gere um novo segredo na aba Telegram.', false);
