@@ -1,0 +1,24 @@
+# Ao dar push na main, avisa o servidor para atualizar na hora (o timer do servidor é o plano B).
+# Configure em GitHub > Settings > Secrets and variables > Actions:
+#   SSH_HOST (IP do servidor), SSH_USER (ubuntu), SSH_KEY (chave privada de deploy), SSH_APP_DIR (pasta do projeto no servidor)
+name: Deploy no servidor
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency: { group: deploy, cancel-in-progress: false }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Atualizar via SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_APP_DIR: ${{ secrets.SSH_APP_DIR }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -T 10 "$SSH_HOST" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$SSH_USER@$SSH_HOST" "cd '$SSH_APP_DIR' && bash ./deploy/servidor/atualizar.sh"
