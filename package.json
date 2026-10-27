@@ -1,0 +1,26 @@
+{
+  "name": "central-promocoes-afiliados",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Central de Promoções e Afiliados: painel admin + banco (Supabase/Postgres) + deploy",
+  "engines": {
+    "node": ">=18.18"
+  },
+  "scripts": {
+    "setup": "node scripts/run.mjs setup",
+    "dev": "node scripts/run.mjs dev",
+    "demo": "node scripts/run.mjs dev --demo",
+    "test": "node scripts/run.mjs test",
+    "build": "node scripts/run.mjs build",
+    "preview": "node scripts/run.mjs preview",
+    "check": "node scripts/run.mjs check",
+    "db:up": "node scripts/db.mjs up",
+    "db:down": "node scripts/db.mjs down",
+    "db:test": "node scripts/db.mjs test",
+    "db:psql": "node scripts/db.mjs psql",
+    "e2e": "node scripts/e2e.cjs && node scripts/e2e-novidades.cjs && node scripts/e2e-integracoes.cjs",
+    "n8n:build": "node scripts/n8n-build.mjs",
+    "n8n:test": "node scripts/n8n-test.mjs",
+    "release:oracle": "powershell -ExecutionPolicy Bypass -File scripts/release-oracle.ps1"
+  }
+}

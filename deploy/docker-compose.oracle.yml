@@ -1,0 +1,33 @@
+# Painel de produção na Oracle Cloud. O Nginx Proxy Manager existente deve estar
+# na rede externa hubly-network para encaminhar HTTPS a promo-admin:80.
+services:
+  promo-admin:
+    build:
+      context: ../admin
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?defina VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?defina VITE_SUPABASE_ANON_KEY}
+    image: central-promocoes-admin:local
+    container_name: promo-admin
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    networks:
+      - npm_proxy
+
+networks:
+  npm_proxy:
+    external: true
+    name: ${NPM_NETWORK:-hubly-network}
