@@ -230,7 +230,7 @@ export function createDemoApi(): Api {
       if (action === 'restart') return { restarted: true };
       if (action === 'logout') { evoOpenAt = 0; return { logged_out: true }; }
       if (action === 'set_webhook') { if (!evo.webhook_url) ERR('Informe o endereço do webhook do n8n (aba WhatsApp).'); return { webhook: { enabled: true, url: evo.webhook_url } }; }
-      if (action === 'send_test') { if (!open()) ERR('A instância não está conectada ao WhatsApp'); return { sent: true, message_id: 'DEMO' + Date.now() }; }
+      if (action === 'send_test') { return { sent: true, message_id: 'DEMO' + Date.now() }; }
     }
     if (provider === 'n8n') {
       if (action === 'selftest') {

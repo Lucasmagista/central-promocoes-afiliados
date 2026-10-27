@@ -16,3 +16,5 @@ data/
 secrets/
 .whatsapp-session/
 _to_delete
+# Segredos do servidor (nunca versionar)
+deploy/admin.env

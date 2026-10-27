@@ -264,6 +264,15 @@ export async function selfTest(ctx, rt) {
   add('tg_cfg', 'Telegram configurado (token e ligado)', tg.enabled && sec.telegram_bot_token, !sec.telegram_bot_token ? 'falta o token do bot' : !tg.enabled ? 'o Telegram está desligado nas configurações' : `modo ${tg.mode}`, false);
   add('hook_wa', 'Webhook de entrada do WhatsApp salvo', !!ev.webhook_url, ev.webhook_url ? maskUrl(ev.webhook_url) : 'Cole o endereço na aba WhatsApp (passo 3).', false);
   add('hook_tg', 'Webhook de entrada do Telegram', tg.mode !== 'webhook' || (tg.webhook_url && sec.telegram_webhook_secret), tg.mode !== 'webhook' ? 'Não usado (modo polling)' : tg.webhook_url ? maskUrl(tg.webhook_url) : 'Modo webhook sem endereço salvo.', false);
+  const lim = ctx.limits || {};
+  add('ratelimit', 'Limite de requisições nos webhooks', !!ctx.hasStore, ctx.hasStore ? `Ativo: até ${lim.webhookPorMin || 120} por minuto por webhook` : 'Indisponível neste n8n (sem memória do workflow): os webhooks ficam sem limite de taxa.', false);
+  add('service_role', 'Chave do Supabase é a service_role', !env.key_role || env.key_role === 'service_role' || env.key_role === 'desconhecido', env.key_role === 'anon' ? 'Esta é a chave ANON: as tarefas vão falhar. Use a service_role.' : env.key_role ? `Papel da chave: ${env.key_role}` : '—', true);
+  const https = (u) => !u || /^https:\/\//i.test(u);
+  add('https', 'Endereços usam HTTPS', https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url), https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url) ? 'Tudo em HTTPS' : 'Há endereço sem HTTPS: a chave e as mensagens viajam sem proteção.', false);
+  const lastSeg = (u) => { try { return new URL(u).pathname.split('/').filter(Boolean).pop() || ''; } catch { return ''; } };
+  const weak = [ev.webhook_url, tg.webhook_url].filter(Boolean).filter((u) => lastSeg(u).length < 20);
+  add('hook_secret_path', 'Caminho dos webhooks é secreto', weak.length === 0, weak.length ? 'Algum caminho é curto/previsível. Use o caminho aleatório do arquivo importado.' : 'Caminhos longos e aleatórios', false);
+  add('tg_secret', 'Segredo do webhook do Telegram é forte', tg.mode !== 'webhook' || (sec.telegram_webhook_secret || '').length >= 32, tg.mode !== 'webhook' ? 'Não usado (modo polling)' : (sec.telegram_webhook_secret || '').length >= 32 ? 'Forte' : 'Gere um novo segredo na aba Telegram.', false);
   add('paused', 'Envios liberados', !rt.paused, rt.paused ? 'A pausa geral está ligada: nada é publicado até retomar.' : 'Sem pausa', false);
   const bad = checks.filter((c) => c.required && !c.ok);
   const out = { ok: bad.length === 0, checks, ms: ctx.now().getTime() - t0, supabase_ms: ms, at: ctx.now().toISOString() };
@@ -285,7 +294,6 @@ async function webhookCheck(ctx, rt) {
   await one('Telegram (bot → n8n)', rt.telegram.webhook_url, { 'x-telegram-bot-api-secret-token': rt.secrets.telegram_webhook_secret || '' }, { update_id: 0 });
   return { webhooks: res, ok: res.filter((r) => r.configured).every((r) => r.ok) && res.some((r) => r.configured) };
 }
-
 // Executa apenas migrações ainda não registradas. O token de gerenciamento fica
 // no cofre do banco e nunca é devolvido ao painel, log ou resultado da tarefa.
 async function applyDatabaseMigrations(ctx, rt) {
@@ -316,6 +324,7 @@ async function applyDatabaseMigrations(ctx, rt) {
   await ctx.rpc('report_integration_status', { p_provider: 'database', p_status: { ok: true, latest: out.latest, applied: done, at: ctx.now().toISOString() } });
   return out;
 }
+
 
 async function integrationTask(ctx, rt, payload) {
   const { provider, action } = payload;
@@ -636,9 +645,32 @@ export function mapTelegramUpdate(u) {
     body: text || `[${kind}]`, kind, sent_at: m.date ? new Date(m.date * 1000).toISOString() : undefined };
 }
 // Webhook do Telegram: confere o segredo do cabeçalho X-Telegram-Bot-Api-Secret-Token antes de aceitar.
+/* ------------------------------------------------------------------ Segurança dos webhooks de entrada */
+// Comparação em tempo constante (evita descobrir o segredo pelo tempo de resposta).
+export function safeEq(a, b) { a = String(a ?? ''); b = String(b ?? ''); if (a.length !== b.length || !a) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }
+const headerOf = (h, name) => { if (!h) return ''; const k = Object.keys(h).find((x) => x.toLowerCase() === name); return k ? String(h[k]) : ''; };
+// Porteiro: roda ANTES de qualquer consulta ao banco. Recusa lixo, excesso e requisições sem credencial,
+// para que um ataque de inundação nunca chegue ao Supabase. Devolve { blocked, status, motivo }.
+export function guardWebhook(ctx, kind, item) {
+  const lim = ctx.limits || {}; const maxKb = lim.corpoMaxKb || 256; const perMin = lim.webhookPorMin || 120;
+  const body = item && item.body; const headers = (item && item.headers) || {};
+  const deny = (status, motivo) => ({ blocked: true, ok: false, status, motivo });
+  let size = 0; try { size = JSON.stringify(body || {}).length; } catch { return deny(400, 'corpo ilegível'); }
+  if (size > maxKb * 1024) return deny(413, 'corpo grande demais');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return deny(400, 'corpo inválido');
+  if (kind === 'telegram') {
+    const tok = headerOf(headers, 'x-telegram-bot-api-secret-token');
+    if (tok.length < 16 || tok.length > 256) return deny(401, 'sem segredo do Telegram'); // nem consulta o banco
+  } else if (kind === 'whatsapp') {
+    if (typeof body.instance !== 'string' || typeof body.event !== 'string' || body.instance.length > 100 || body.event.length > 60) return deny(400, 'formato inesperado');
+  }
+  if (ctx.limit) { const r = ctx.limit('hook:' + kind, perMin, 60000); if (!r.ok) return { ...deny(429, 'excesso de requisições'), retryAfter: r.retryAfter }; }
+  return { blocked: false };
+}
+
 export async function handleTelegramWebhook(ctx, headers, body) {
   const rt = await loadRuntime(ctx); const want = rt.secrets.telegram_webhook_secret; const got = headers && (headers['x-telegram-bot-api-secret-token'] || headers['X-Telegram-Bot-Api-Secret-Token']);
-  if (!want || got !== want) return { ok: false, status: 401 };
+  if (!want || want.length < 16 || !safeEq(got, want)) return { ok: false, status: 401 };
   const m = mapTelegramUpdate(body); if (m) await ctx.rpc('ingest_chat_message', { p: m });
   return { ok: true, status: 200 };
 }
@@ -647,6 +679,6 @@ export async function handleEvolutionWebhook(ctx, body) {
   const rt = await loadRuntime(ctx);
   if (!rt.evolution.instance || (body && body.instance) !== rt.evolution.instance) return { ok: false, status: 403 };
   if (!/messages[._]upsert/i.test(String(body && body.event))) return { ok: true, status: 200, ignored: true };
-  let n = 0; for (const m of mapEvolutionMessage(body)) { await ctx.rpc('ingest_chat_message', { p: m }); n++; }
+  let n = 0; for (const m of mapEvolutionMessage(body).slice(0, 50)) { await ctx.rpc('ingest_chat_message', { p: m }); n++; }
   return { ok: true, status: 200, stored: n };
 }

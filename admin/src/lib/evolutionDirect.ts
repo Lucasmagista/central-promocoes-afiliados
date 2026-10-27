@@ -103,3 +103,10 @@ export function createDemoDirectClient(instance: string): DirectClient {
     async listInstances() { return wait(state === 'missing' ? [] : [{ name: instance, state, phone: state === 'open' ? '5511999990001' : null }], 250); },
   };
 }
+
+/** Chave (apikey) lembrada neste navegador, para o QR direto funcionar sem pedir de novo. Só vai ao servidor da Evolution, nunca ao banco por aqui. */
+const KEY_STORE = 'central.evo.key';
+export const evoKey = {
+  get(): string { try { return localStorage.getItem(KEY_STORE) ?? ''; } catch { return ''; } },
+  set(v: string) { try { if (v) localStorage.setItem(KEY_STORE, v); else localStorage.removeItem(KEY_STORE); } catch { /* sem armazenamento: some ao recarregar */ } },
+};

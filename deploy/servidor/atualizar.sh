@@ -19,9 +19,10 @@ LOCAL="$(git rev-parse HEAD)"; REMOTO="$(git rev-parse "origin/$BRANCH")"
 if [[ "$LOCAL" == "$REMOTO" && $FORCE -eq 0 ]]; then exit 0; fi
 log "Atualizando ${LOCAL:0:7} -> ${REMOTO:0:7}"
 git merge --ff-only "origin/$BRANCH" >>"$LOG" 2>&1 || { log "ERRO: o servidor tem alterações locais divergentes; resolva manualmente (git status)."; exit 1; }
-PN="$(grep -E '^PROXY_NETWORK=' "$ENVF" | cut -d= -f2- || true)"; PN="${PN:-proxy}"
-docker network inspect "$PN" >/dev/null 2>&1 || docker network create "$PN" >/dev/null
-docker compose -f deploy/docker-compose.admin.yml --env-file "$ENVF" up -d --build >>"$LOG" 2>&1 || { log "ERRO no build. Versão anterior segue no ar se o build falhou antes do 'up'. Veja $LOG"; exit 1; }
+PN="$(grep -E '^NPM_NETWORK=' "$ENVF" | cut -d= -f2- || true)"; PN="${PN:-hubly-network}"
+docker network inspect "$PN" >/dev/null 2>&1 || { log "ERRO: rede Docker '$PN' (a do Nginx Proxy Manager) não existe"; exit 1; }
+COMPOSE="${COMPOSE_FILE:-deploy/docker-compose.oracle.yml}"; [[ -f "$COMPOSE" ]] || COMPOSE="deploy/docker-compose.admin.yml"
+docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --build >>"$LOG" 2>&1 || { log "ERRO no build. Versão anterior segue no ar se o build falhou antes do 'up'. Veja $LOG"; exit 1; }
 for i in {1..20}; do
   s="$(docker inspect -f '{{.State.Health.Status}}' promo-admin 2>/dev/null || echo none)"
   [[ "$s" == "healthy" ]] && { log "OK: painel saudável em $(git rev-parse --short HEAD)"; docker image prune -f >/dev/null 2>&1 || true; exit 0; }

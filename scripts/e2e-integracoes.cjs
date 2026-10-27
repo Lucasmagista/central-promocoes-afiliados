@@ -11,7 +11,7 @@ const until = (p, re, t = 15000) => p.waitForFunction((s) => new RegExp(s, 'i').
 
   // ---------- Configurações: navegação e Operação
   await p.goto(B + 'configuracoes'); await p.waitForSelector('.setnav');
-  ok(await p.locator('.setnav button').count() === 6, 'configurações: 6 seções');
+  ok(await p.locator('.setnav button').count() === 7, 'configurações: 7 seções');
   ok(await p.getByText('Pausa geral de envios').count() > 0, 'operação: pausa geral');
   await p.screenshot({ path: S + '/i_operacao.png', fullPage: true });
 
@@ -20,25 +20,26 @@ const until = (p, re, t = 15000) => p.waitForFunction((s) => new RegExp(s, 'i').
   ok(await p.getByLabel('Endereço da Evolution API').inputValue() === 'https://whatsapp.hubly.software', 'whatsapp: endereço do servidor já preenchido');
   ok(await p.getByRole('button', { name: 'Verificar agora' }).isDisabled(), 'verificar desabilitado sem chave');
   await p.getByLabel('Nome da instância').fill('central-ofertas');
-  await p.getByLabel('Chave de acesso (apikey)').fill('curta'); await p.getByRole('button', { name: 'Guardar' }).click();
+  await p.getByLabel('Chave de acesso (apikey)').fill('curta'); await p.getByRole('button', { name: 'Salvar conexão' }).click();
   await until(p, /entre 12 e 200|12 a 200/); ok(true, 'chave curta é recusada com explicação');
-  await p.getByLabel('Chave de acesso (apikey)').fill('chave-de-teste-evolution-123456'); await p.getByRole('button', { name: 'Guardar' }).click();
-  await p.waitForSelector('.secretrow code', { timeout: 8000 }); ok(await p.getByText('••••••••3456').count() > 0, 'chave guardada: só mostra os 4 últimos');
+  await p.getByLabel('Chave de acesso (apikey)').fill('chave-de-teste-evolution-123456'); await p.getByRole('button', { name: 'Salvar conexão' }).click();
+  await p.getByRole('button', { name: 'Alterar' }).waitFor({ timeout: 8000 });
+  ok(await p.getByLabel('Endereço da Evolution API').isDisabled() && await p.getByLabel('Nome da instância').isDisabled(), 'após salvar: campos travados');
+  ok(await p.getByLabel('Chave de acesso guardada').inputValue() === '••••••••••••3456', 'chave guardada: só mostra os 4 últimos');
   ok(!(await p.content()).includes('chave-de-teste-evolution'), 'valor da chave não aparece na página');
-  await p.getByRole('button', { name: 'Salvar conexão' }).click(); await until(p, /Configuração do WhatsApp salva/);
-  await p.getByRole('button', { name: 'Verificar agora' }).click(); await p.locator('.statushero .badge', { hasText: /^Desconectado$/ }).waitFor({ timeout: 15000 }); ok(true, 'status: instância desconectada');
-  ok(await p.getByText('2.3.7').count() > 0, 'status mostra versão da Evolution');
-  await p.getByRole('button', { name: 'Via n8n' }).click();
+  await p.getByRole('button', { name: 'Alterar' }).click(); ok(await p.getByLabel('Nome da instância').isEnabled(), 'Alterar destrava os campos'); await p.getByRole('button', { name: 'Cancelar' }).click();
+  ok(await p.getByLabel('Nome da instância').isDisabled(), 'Cancelar trava de novo');
+  ok(await p.getByRole('button', { name: 'Conectar com QR code' }).isVisible(), 'botão de conexão logo abaixo, sem escolher modo');
   await p.getByRole('button', { name: 'Conectar com QR code' }).click(); await p.waitForSelector('.qrbox img', { timeout: 15000 }); ok(true, 'QR code exibido');
   ok(await p.getByText('Aparelhos conectados').count() > 0, 'instruções de leitura exibidas');
   await p.screenshot({ path: S + '/i_whatsapp_qr.png', fullPage: true });
   await p.getByLabel(/Sem câmera/).fill('11999990001'); await p.getByRole('button', { name: 'Gerar código' }).click();
   await p.waitForSelector('.paircode', { timeout: 15000 }); ok(true, 'código de pareamento exibido');
-  await p.waitForTimeout(9500); await p.getByRole('button', { name: 'Verificar agora' }).click(); await p.locator('.statushero .badge', { hasText: /^Conectado$/ }).waitFor({ timeout: 15000 }); ok(await p.locator('.qrbox').count() === 0, 'conectou: QR some'); ok(await p.getByText('+5511999990001').count() > 0, 'número conectado exibido');
+  await p.locator('.statushero .badge', { hasText: /^Conectado$/ }).waitFor({ timeout: 20000 }); ok(await p.locator('.qrbox').count() === 0, 'conectou: QR some'); ok(await p.getByText('+5511999990001').count() > 0, 'número conectado exibido');
   await p.getByLabel('Endereço do webhook no n8n').fill('http://inseguro.com/x'); await p.getByRole('button', { name: 'Salvar' }).first().click();
   await until(p, /https/); ok(true, 'webhook http é recusado');
   await p.getByLabel('Endereço do webhook no n8n').fill('https://n8n.exemplo.com.br/webhook/central-whatsapp-x9Zq'); await p.getByRole('button', { name: 'Salvar' }).first().click(); await until(p, /Configuração do WhatsApp salva/);
-  await p.getByRole('button', { name: 'Configurar na Evolution' }).click(); await until(p, /Webhook configurado na Evolution/); ok(true, 'webhook configurado');
+  await p.getByRole('button', { name: 'Configurar webhook' }).click(); await until(p, /Webhook configurado na Evolution/); ok(true, 'webhook configurado');
   await p.getByLabel('Espera mínima entre mensagens (s)').fill('20'); await p.getByRole('button', { name: 'Salvar' }).nth(1).click(); await until(p, /Intervalo|mínimo/); ok(true, 'espera mínima maior que a máxima é recusada');
   await p.getByLabel('Espera mínima entre mensagens (s)').fill('5');
   await p.getByLabel('Número de destino').fill('11999990001'); await p.getByRole('button', { name: 'Enviar teste' }).click(); await until(p, /Mensagem enviada/); ok(true, 'teste de envio WhatsApp');

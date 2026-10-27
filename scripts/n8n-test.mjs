@@ -374,8 +374,9 @@ ok(db.status.evolution.state === 'close', 'monitor: estado atualizado');
 const { execFileSync } = await import('node:child_process');
 execFileSync('node', [join(root, 'scripts', 'n8n-build.mjs')], { stdio: 'pipe' });
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-for (const f of readdirSync(join(root, 'deploy', 'n8n')).filter((x) => /^\d\d-.*\.json$/.test(x))) {
-  const wfj = JSON.parse(readFileSync(join(root, 'deploy', 'n8n', f), 'utf8'));
+const wfFiles = [join('deploy', 'n8n'), join('deploy', 'n8n', 'separados')].flatMap((d) => readdirSync(join(root, d)).filter((x) => /^\d\d-.*\.json$/.test(x)).map((x) => join(d, x)));
+for (const f of wfFiles) {
+  const wfj = JSON.parse(readFileSync(join(root, f), 'utf8'));
   const codeNodes = wfj.nodes.filter((n) => n.type === 'n8n-nodes-base.code');
   let good = codeNodes.length > 0; for (const cn of codeNodes) { try { new AsyncFunction('$env', '$input', 'require', cn.parameters.jsCode); } catch (e) { good = false; console.log(cn.name, e.message); } }
   const names = new Set(wfj.nodes.map((n) => n.name)); const conn = names.size === wfj.nodes.length && Object.entries(wfj.connections).every(([a, v]) => names.has(a) && v.main[0].every((t) => names.has(t.node)));
@@ -389,10 +390,11 @@ const sbSrv = await listen(async (req, res) => {
   send(res, 200, null);
 });
 const full = JSON.parse(readFileSync(join(root, 'deploy', 'n8n', '00-central-completo.json'), 'utf8'));
+let staticStore = {};
 const runNode = async (name, env, input = {}) => {
   const n = full.nodes.find((x) => x.name === name); const self = { helpers: { httpRequest: async (o) => { const r = await fetch(o.url, { method: o.method, headers: o.headers, body: o.body, signal: AbortSignal.timeout(5000) }); return { statusCode: r.status, body: await r.text() }; } } };
-  const fn = new AsyncFunction('$env', '$input', 'require', n.parameters.jsCode);
-  return (await fn.call(self, env, { first: () => ({ json: input }) }, () => { throw new Error('require bloqueado'); }))[0].json;
+  const fn = new AsyncFunction('$env', '$input', 'require', '$getWorkflowStaticData', n.parameters.jsCode);
+  return (await fn.call(self, env, { first: () => ({ json: input }) }, () => { throw new Error('require bloqueado'); }, () => staticStore))[0].json;
 };
 let r = await runNode('Rodar autoteste', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' });
 ok(r.ok === true && r.checks.find((c) => c.id === 'supabase').ok && r.checks.find((c) => c.id === 'sha').ok, 'arquivo completo: autoteste executa de verdade (sem require)');
@@ -403,6 +405,18 @@ ok(r.ok === false && /SUPABASE_URL/.test(r.checks[0].detail), 'autoteste: variá
 const blocked = new Proxy({}, { get() { throw new Error('access to env vars denied'); } });
 r = await runNode('Rodar autoteste', blocked);
 ok(r.ok === false && /N8N_BLOCK_ENV_ACCESS_IN_NODE/.test(r.checks[0].detail), 'autoteste: env bloqueado pelo n8n explicado');
+// ---- configuração embutida no arquivo (sem variáveis de ambiente) ----
+{
+  const cn = full.nodes.find((x) => x.name === 'Rodar autoteste');
+  ok(cn.parameters.jsCode.includes("key: 'COLE_AQUI_A_SERVICE_ROLE_KEY'"), 'arquivo traz o marcador da chave para trocar');
+  const baked = JSON.parse(JSON.stringify(full)); const bn = baked.nodes.find((x) => x.name === 'Rodar autoteste');
+  bn.parameters.jsCode = bn.parameters.jsCode.split('COLE_AQUI_A_URL_DO_SUPABASE').join(sbSrv.url).split('COLE_AQUI_A_SERVICE_ROLE_KEY').join('SRK');
+  const keep = full.nodes; full.nodes = baked.nodes;
+  const blockedEnv = new Proxy({}, { get() { throw new Error('access to env vars denied'); } });
+  const rr = await runNode('Rodar autoteste', blockedEnv);
+  ok(rr.ok === true && rr.checks.find((c) => c.id === 'supabase').ok, 'config embutida: funciona mesmo com variáveis de ambiente bloqueadas');
+  full.nodes = keep;
+}
 r = await runNode('Executar tarefas do painel', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' });
 ok(r.done === 0, 'arquivo completo: worker de tarefas executa (fila vazia)');
 r = await runNode('Gravar mensagem do WhatsApp', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' }, { body: { instance: 'central', event: 'connection.update' } });
@@ -414,5 +428,28 @@ const used = [...new Set(db.calls)]; const missing = used.filter((n) => !params[
 ok(missing.length === 0, 'contrato: toda função RPC usada existe nas migrações' + (missing.length ? ' — faltam: ' + missing.join(', ') : ''));
 
 for (const s of [evoSrv, tgSrv, ml, shopee]) s.s.close();
+// ---- segurança do arquivo completo ----
+const E0 = { SUPABASE_URL: 'http://127.0.0.1:1', SUPABASE_SERVICE_ROLE_KEY: 'x' };
+staticStore = {};
+let g = await runNode('Porteiro Telegram (segurança)', E0, { headers: {}, body: { update_id: 1 } });
+ok(g.blocked === true && g.status === 401, 'porteiro Telegram: sem segredo é recusado (401) antes do banco');
+g = await runNode('Porteiro Telegram (segurança)', E0, { headers: { 'x-telegram-bot-api-secret-token': 'a'.repeat(32) }, body: { update_id: 1 } });
+ok(g.blocked === false, 'porteiro Telegram: com cabeçalho passa para validação');
+g = await runNode('Porteiro WhatsApp (segurança)', E0, { body: { foo: 1 } });
+ok(g.blocked === true && g.status === 400, 'porteiro WhatsApp: formato inválido é recusado (400)');
+g = await runNode('Porteiro WhatsApp (segurança)', E0, { body: 'x'.repeat(300 * 1024) });
+ok(g.blocked === true, 'porteiro WhatsApp: corpo gigante é recusado');
+staticStore = {};
+let last; for (let i = 0; i < 125; i++) last = await runNode('Porteiro WhatsApp (segurança)', E0, { body: { instance: 'a', event: 'messages.upsert' } });
+ok(last.blocked === true && last.status === 429, 'porteiro WhatsApp: acima de 120/min vira 429');
+staticStore = {};
+for (let i = 0; i < 6; i++) last = await runNode('Limitar autoteste', E0, {});
+ok(last.blocked === false, 'autoteste: 6 chamadas por minuto passam');
+last = await runNode('Limitar autoteste', E0, {});
+ok(last.blocked === true && last.status === 429, 'autoteste: a 7ª chamada no minuto é limitada');
+staticStore = { mx: { sender: Date.now() } };
+const lk = await runNode('Enviar e monitorar', E0, {});
+ok(lk.skipped, 'envio: não roda em duplicidade (trava)');
+console.log('\nSEGURANÇA DO ARQUIVO COMPLETO OK');
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES DO WORKER PASSARAM');
 process.exit(fails ? 1 : 0);

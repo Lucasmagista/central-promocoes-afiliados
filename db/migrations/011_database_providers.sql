@@ -7,15 +7,19 @@
 -- ============================================================================
 
 create table if not exists public.app_schema_migrations (
-  version text primary key check (version ~ '^\\d{3}_[a-z0-9_]+\\.sql$'),
+  version text primary key check (version ~ '^[0-9]{3}_[a-z0-9_]+[.]sql$'),
   applied_at timestamptz not null default now(),
   applied_by text not null default 'bootstrap',
   checksum text
 );
+-- Corrige a restrição caso a tabela já tenha sido criada com a expressão antiga (inválida).
+alter table public.app_schema_migrations drop constraint if exists app_schema_migrations_version_check;
+alter table public.app_schema_migrations add constraint app_schema_migrations_version_check check (version ~ '^[0-9]{3}_[a-z0-9_]+[.]sql$');
 alter table public.app_schema_migrations enable row level security;
 revoke all on public.app_schema_migrations from public, anon;
 grant select on public.app_schema_migrations to authenticated;
 grant all on public.app_schema_migrations to service_role;
+drop policy if exists read_member on public.app_schema_migrations;
 create policy read_member on public.app_schema_migrations for select to authenticated using (public.is_member());
 
 insert into public.app_schema_migrations(version, applied_by) values
