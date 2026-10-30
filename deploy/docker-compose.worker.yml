@@ -11,6 +11,8 @@ services:
     container_name: promo-worker
     restart: unless-stopped
     env_file: worker/worker.env
+    volumes:
+      - ../db/migrations:/app/migrations:ro
     read_only: true
     tmpfs:
       - /tmp

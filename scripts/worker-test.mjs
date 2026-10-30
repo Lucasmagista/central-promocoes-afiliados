@@ -91,7 +91,7 @@ const tgSrv = await listen(async (req, res) => {
 });
 
 /* ---------- Mercado Livre e Shopee falsos ---------- */
-const mlState = { access: ML_ACCESS, refresh: 'ref' + rnd(20), refreshCalls: 0, searchStatus: 200 };
+const mlState = { itemPrice: 0, itemQty: 5, access: ML_ACCESS, refresh: 'ref' + rnd(20), refreshCalls: 0, searchStatus: 200 };
 const ml = await listen(async (req, res) => {
   const body = await readBody(req);
   if (req.url === '/oauth/token') {
@@ -103,6 +103,7 @@ const ml = await listen(async (req, res) => {
     return send(res, 400, { message: 'unsupported_grant_type' });
   }
   const authed = req.headers.authorization === 'Bearer ' + ML_ACCESS || req.headers.authorization === 'Bearer ' + mlState.access;
+  if (req.url.startsWith('/items/')) { if (!authed) return send(res, 403, { message: 'forbidden' }); const id = req.url.split('/items/')[1]; if (id === 'MLB1') return send(res, 200, { id: 'MLB1', title: 'Fone Bluetooth Bom', price: mlState.itemPrice || 80, original_price: 160, available_quantity: mlState.itemQty ?? 5, status: 'active', condition: 'new', permalink: 'https://produto.mercadolivre.com.br/MLB-1-fone', thumbnail: 'http://http2.mlstatic.com/D_1-I.jpg', sold_quantity: 200 }); return send(res, 404, { message: 'not found' }); }
   if (req.url === '/users/me') return authed ? send(res, 200, { id: 99, nickname: 'LUCAS_AFILIADO', site_id: 'MLB', permalink: 'https://perfil.mercadolivre.com.br/LUCAS_AFILIADO', seller_reputation: { level_id: '5_green', power_seller_status: 'gold' } }) : send(res, 401, { message: 'invalid_token' });
   if (req.url.startsWith('/sites/MLB/search')) {
     if (!authed) return send(res, 403, { message: 'forbidden' });
@@ -123,7 +124,9 @@ const shopee = await listen(async (req, res) => {
   const expect = a && crypto.createHash('sha256').update(a[1] + a[2] + body + SP_SECRET).digest('hex');
   if (!a || a[3] !== expect) return send(res, 200, { errors: [{ message: 'Invalid Signature', extensions: { code: 10020 } }] });
   const q = String(JSON.parse(body).query); spState.queries.push(q);
-  if (q.includes('conversionReport')) return send(res, 200, { data: { conversionReport: { nodes: [{ totalCommission: '12.50' }, { totalCommission: '7.50' }], pageInfo: { hasNextPage: false } } } });
+  if (/generateShortLink/.test(q)) return send(res, 200, { data: { generateShortLink: { shortLink: 'https://s.shopee.com.br/sub1' } } });
+  { const wi = /itemId:(\d+)/.exec(q); if (wi && wi[1] !== '55') return send(res, 200, { data: { productOfferV2: { nodes: [] } } }); }
+  if (q.includes('conversionReport')) return send(res, 200, { data: { conversionReport: { nodes: [{ conversionId: 'cv1', purchaseTime: 1760000000, totalCommission: '12.50', utmContent: 'gabc' }, { conversionId: 'cv2', purchaseTime: 1760100000, totalCommission: '7.50' }], pageInfo: { hasNextPage: false } } } });
   send(res, 200, { data: { productOfferV2: { nodes: [
     { itemId: '55', shopId: '9', productName: 'Caixa de Som', price: '75.00', priceDiscountRate: 50, commissionRate: '0.12', sales: 900, imageUrl: 'https://down-br.img.susercontent.com/file/x', shopName: 'Loja Shopee', productLink: 'https://shopee.com.br/product/9/55', offerLink: 'https://s.shopee.com.br/abc' },
     { itemId: '56', shopId: '9', productName: 'Sem desconto', price: '40.00', priceDiscountRate: 0, commissionRate: '0.05', productLink: 'https://shopee.com.br/product/9/56', offerLink: 'https://s.shopee.com.br/def' },
@@ -142,10 +145,15 @@ const ali = await listen(async (req, res) => {
     { product_id: 1005002, product_title: 'Sem desconto', target_sale_price: '20.00', target_original_price: '20.00', promotion_link: 'https://s.click.aliexpress.com/e/_def' },
   ] } } } } });
 });
-const amzState = { tokenCalls: 0, searches: [] };
+const amzState = { tokenCalls: 0, searches: [], price: 0 };
 const amz = await listen(async (req, res) => {
   const body = JSON.parse((await readBody(req)) || '{}');
   if (req.url === '/token') { amzState.tokenCalls++; return body.client_id === 'CRED1' && body.client_secret === AMZ_SECRET && body.scope === 'creatorsapi::default' && body.grant_type === 'client_credentials' ? send(res, 200, { access_token: 'amztok', expires_in: 3600 }) : send(res, 400, { error: 'invalid_client' }); }
+  if (req.url === '/catalog/v1/getItems') {
+    if (req.headers.authorization !== 'Bearer amztok') return send(res, 401, { errors: [{ code: 'Unauthorized', message: 'token inválido' }] });
+    if (!body.itemIds.includes('B0TEST0001')) return send(res, 200, { itemsResult: { items: [] } });
+    return send(res, 200, { itemsResult: { items: [{ asin: 'B0TEST0001', detailPageURL: 'https://www.amazon.com.br/dp/B0TEST0001?tag=lucas-20', itemInfo: { title: { displayValue: 'Echo Dot' } }, offersV2: { listings: [{ isBuyBoxWinner: true, price: { money: { amount: amzState.price || 249.9 }, savingBasis: { money: { amount: 449.9 } } } }] } }] } });
+  }
   if (req.url === '/catalog/v1/searchItems') {
     if (req.headers.authorization !== 'Bearer amztok') return send(res, 401, { errors: [{ code: 'Unauthorized', message: 'token inválido' }] });
     amzState.searches.push({ body, mkt: req.headers['x-marketplace'] });
@@ -166,7 +174,7 @@ const db = {
   evolution: { base_url: evoSrv.url, instance: 'central', webhook_url: 'https://worker.exemplo.com/hook/whatsapp-x', send_delay_min_s: 1, send_delay_max_s: 1, alerts: true },
   telegram: { enabled: true, mode: 'polling', webhook_url: 'https://worker.exemplo.com/hook/telegram-x', admin_chat_id: '555', alerts: true },
   groups: { whatsapp: { only_admins_send: true, lock_info: true, ephemeral_seconds: 604800, add_disclosure: true, add_batch_size: 2, add_delay_s: 2, invite_after_create: true }, telegram: {} }, disclosure: 'Link de afiliado: posso receber comissão.',
-  status: {}, runs: [], offers: [], rejectedOffers: [], jobs: [], pubs: [], outbox: [], tests: [], ingested: [], calls: [], completed: {}, failed: {}, pubResults: [],
+  status: {}, runs: [], offers: [], rejectedOffers: [], reprices: [], revalidated: [], shortTargets: [], signals: [], radarQueue: [], captured: [], sources: [], linkCache: {}, autoApproved: 0, watch: [], watchUpdates: [], commissions: [], jobGate: {}, snapshot: null, alertSent: {}, pubCtx: null, jobs: [], pubs: [], outbox: [], tests: [], ingested: [], calls: [], completed: {}, failed: {}, pubResults: [],
   connectors: { shopee: { mode: 'api_ready', config: { app_id: 'APP1', api_endpoint: null } }, mercadolivre: { mode: 'api_pending', config: { app_id: '111' } }, amazon: { mode: 'disabled', config: {} } },
 };
 const unchecked = new Set();
@@ -194,6 +202,28 @@ const rpc = async (name, args) => {
     case 'finish_run': Object.assign(db.runs[Number(String(args.p_run).slice(3)) - 1], { status: args.p_status, seen: args.p_seen, accepted: args.p_accepted, rejected: args.p_rejected, error: args.p_error }); return null;
     case 'ingest_offer': { db.offers.push(args.p); const dup = db.offers.filter((o) => o.external_id === args.p.external_id).length > 1; return dup ? { status: 'duplicate', reason: 'open_offer' } : args.p.platform === 'shopee' && args.p.title === 'Caixa de Som' && db.rejectShopee ? { status: 'rejected', failures: [{ code: 'domain_not_allowed' }] } : { status: 'created', offer_id: 'of' + db.offers.length, score: db.score ?? 80 }; }
     case 'reject_offer': db.rejectedOffers.push(args.p_offer); return null;
+    case 'get_publication_context': return db.pubCtx;
+    case 'reprice_offer': db.reprices.push(args); return null;
+    case 'mark_offer_revalidated': db.revalidated.push(args.p_offer); return null;
+    case 'set_short_link_target': db.shortTargets.push(args); return null;
+    case 'set_offer_signals': db.signals.push(args); return null;
+    case 'category_guess': return 'eletronicos';
+    case 'claim_radar_messages': { const q = db.radarQueue; db.radarQueue = []; return q; }
+    case 'record_captured_link': db.captured.push(args.p); return db.captured.length;
+    case 'register_offer_source': db.sources.push(args); return 1;
+    case 'link_cache_get': return db.linkCache[args.p_hash] || null;
+    case 'link_cache_put': db.linkCache[args.p_hash] = { final_url: args.p_final, platform: args.p_platform, external_id: args.p_external }; return null;
+    case 'run_auto_approve': return { approved: db.autoApproved, errors: 0 };
+    case 'expire_offers': return 0;
+    case 'watchlist_due': { const d = db.watch; db.watch = []; return d; }
+    case 'watchlist_update': db.watchUpdates.push(args); return null;
+    case 'upsert_commissions': db.commissions.push(...args.p); return args.p.length;
+    case 'job_should_run': { if (db.jobGate[args.p_key]) return false; db.jobGate[args.p_key] = true; return true; }
+    case 'housekeeping': return { ok: true };
+    case 'ops_snapshot': return db.snapshot;
+    case 'alert_should_send': { if (db.alertSent[args.p_key]) return false; db.alertSent[args.p_key] = true; return true; }
+    case 'alert_clear': delete db.alertSent[args.p_key]; return null;
+    case 'save_integration': (db.savedInt = db.savedInt || []).push(args); return null;
     case 'ingest_chat_message': db.ingested.push(args.p); return { status: 'created' };
     default: return null;
   }
@@ -201,14 +231,14 @@ const rpc = async (name, args) => {
 
 /* ---------- ctx de teste ---------- */
 const ctx = {
-  rpc, urls: { telegram: tgSrv.url, ml: ml.url, amazon: amz.url, amazonToken: amz.url + '/token' }, now: () => new Date(), rand: () => 0, log: () => {}, sleep: async () => {},
+  followHost: /^127\.0\.0\.1$/, rpc, urls: { telegram: tgSrv.url, ml: ml.url, amazon: amz.url, amazonToken: amz.url + '/token' }, now: () => new Date(), rand: () => 0, log: () => {}, sleep: async () => {},
   sha256hex: async (t) => crypto.createHash('sha256').update(t).digest('hex'),
   http: async (o) => {
     let body = o.body; const headers = { ...(o.headers || {}) };
     if (o.form) { headers['content-type'] = 'application/x-www-form-urlencoded'; body = new URLSearchParams(o.form).toString(); } else if (o.json !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(o.json); }
     try {
-      const r = await fetch(o.url, { method: o.method, headers, body, signal: AbortSignal.timeout(Math.min(o.timeoutMs || 20000, 1500)) });
-      const t = await r.text(); let d = t; try { d = JSON.parse(t); } catch { /* texto */ } return { status: r.status, data: d };
+      const r = await fetch(o.url, { method: o.method, headers, body, redirect: o.redirect || 'follow', signal: AbortSignal.timeout(Math.min(o.timeoutMs || 20000, 1500)) });
+      const t = await r.text(); let d = t; try { d = JSON.parse(t); } catch { /* texto */ } return { status: r.status, data: d, location: r.headers.get('location') || undefined };
     } catch (e) { throw { code: /timeout|abort/i.test(String(e.name + e.message)) ? 'timeout' : 'network' }; }
   },
 };
@@ -553,6 +583,161 @@ j = job('integration', null, { provider: 'magalu', action: 'check' }); await W.r
 ok(j.result.ok === true && j.result.partial === true && /API pública/.test(j.result.detail), 'Magalu: avisa com franqueza que a entrada é manual');
 j = job('integration', null, { provider: 'magalu', action: 'collect' }); await W.runJobs(ctx);
 ok(j.status === 'failed', 'Magalu: coleta automática não existe');
+
+/* ---------- Fases 1 a 6: revalidação, Radar, acompanhamento, automação, comissões e alertas ---------- */
+console.log('\n— fases 1 a 6 —');
+db.connectors.shopee = { mode: 'api_ready', config: { app_id: 'APP1', api_endpoint: shopee.url, min_discount_pct: 10, keywords: ['caixa de som'] } };
+db.secrets.shopee_secret = SP_SECRET; db.telegram.enabled = true; tgs.mode = 'ok';
+const sendCtx = { offer_id: 'o1', platform: 'shopee', external_id: '9.55', current_price: 74, revalidated_at: null, short_code: null, sub_id: 'gabc', original_url: 'https://shopee.com.br/produto-i.9.55', affiliate_url: 'https://s.shopee.com.br/abc' };
+db.pubCtx = { ...sendCtx, publication_id: 'p1' }; db.pubResults = []; tgs.sent = []; db.reprices = [];
+pub({ channel: 'telegram', external_chat_id: '-100' }); let rs = await W.runSender(ctx, { budgetMs: 60000 });
+ok(rs.sent === 1 && rs.repriced === 0 && db.revalidated.length === 1 && tgs.sent.length === 1, 'revalidação: oscilação pequena (1,4%) segue para o envio e marca como revalidada');
+db.pubCtx = { ...sendCtx, publication_id: 'p2', current_price: 100 }; tgs.sent = [];
+pub({ channel: 'telegram', external_chat_id: '-100' }); rs = await W.runSender(ctx, { budgetMs: 60000 });
+ok(rs.repriced === 1 && rs.sent === 0 && tgs.sent.length === 0 && db.reprices[0].p_price === 75 && db.reprices[0].p_available === true && /Preço mudou/.test(db.reprices[0].p_note), 'revalidação: preço mudou 25%: NÃO envia, devolve a oferta para revisão com o preço novo');
+db.pubCtx = { ...sendCtx, publication_id: 'p3', external_id: '9.999' }; tgs.sent = []; db.reprices = [];
+pub({ channel: 'telegram', external_chat_id: '-100' }); rs = await W.runSender(ctx, { budgetMs: 60000 });
+ok(rs.sent === 1 && db.reprices.length === 0, 'revalidação: produto não encontrado na API não bloqueia o envio');
+db.pubCtx = { ...sendCtx, publication_id: 'p4', revalidated_at: new Date().toISOString(), current_price: 10 }; tgs.sent = [];
+pub({ channel: 'telegram', external_chat_id: '-100' }); rs = await W.runSender(ctx, { budgetMs: 60000 });
+ok(rs.sent === 1 && rs.repriced === 0, 'revalidação: oferta checada há pouco não é consultada de novo');
+// link por destino
+db.connectors.amazon = { mode: 'api_ready', config: { client_id: 'CRED1', partner_tag: 'lucas-20', marketplace: 'www.amazon.com.br', credential_version: '3.1' } }; db.secrets.amazon_client_secret = AMZ_SECRET;
+db.pubCtx = { offer_id: 'o2', publication_id: 'p5', platform: 'amazon', external_id: 'B0TEST0001', current_price: 249.9, revalidated_at: null, short_code: 'abc12345', sub_id: 'g1x', original_url: 'https://www.amazon.com.br/dp/B0TEST0001', affiliate_url: 'https://www.amazon.com.br/dp/B0TEST0001?tag=lucas-20' };
+db.shortTargets = []; pub({ channel: 'telegram', external_chat_id: '-100' }); rs = await W.runSender(ctx, { budgetMs: 60000 });
+ok(rs.sent === 1 && db.shortTargets[0].p_url.includes('tag=lucas-20') && db.shortTargets[0].p_url.includes('ascsubtag=g1x'), 'link por destino (Amazon): acrescenta o subtag do destino ao link curto');
+db.pubCtx = { ...sendCtx, publication_id: 'p6', current_price: 75, short_code: 'abc12345' }; db.shortTargets = [];
+pub({ channel: 'telegram', external_chat_id: '-100' }); rs = await W.runSender(ctx, { budgetMs: 60000 });
+ok(rs.sent === 1 && db.shortTargets[0].p_url === 'https://s.shopee.com.br/sub1', 'link por destino (Shopee): gera o link curto com o subId do destino');
+db.pubCtx = null;
+// freio quando o WhatsApp limita
+evo.mode = 'rate'; db.pubResults = [];
+pub({ channel: 'whatsapp', external_chat_id: 'a@g.us' }); pub({ channel: 'whatsapp', external_chat_id: 'b@g.us' });
+evo.mode = 'ok';
+db.pubs = db.pubs.slice(-0);
+
+// ---- Radar: funções puras
+ok(W.extractUrls('Olha https://s.shopee.com.br/abc, e https://a.co/x. fim').join('|') === 'https://s.shopee.com.br/abc|https://a.co/x', 'radar: extrai links ignorando pontuação final');
+ok(W.identifyProduct('https://produto.mercadolivre.com.br/MLB-3456789012-fone-bluetooth')?.external_id === 'MLB3456789012', 'radar: identifica produto do Mercado Livre');
+ok(W.identifyProduct('https://shopee.com.br/Fone-i.9.55?sp=1')?.external_id === '9.55' && W.identifyProduct('https://shopee.com.br/product/9/55')?.external_id === '9.55', 'radar: identifica produto da Shopee (dois formatos)');
+ok(W.identifyProduct('https://www.amazon.com.br/Echo/dp/B0TEST0001/ref=x')?.external_id === 'B0TEST0001', 'radar: identifica ASIN da Amazon');
+ok(W.identifyProduct('https://pt.aliexpress.com/item/1005001.html')?.external_id === '1005001', 'radar: identifica produto da AliExpress');
+ok(W.identifyProduct('https://exemplo.com/produto') === null, 'radar: ignora loja desconhecida');
+{ const pr = W.parsePrices('De R$ 1.299,90 por R$ 899,90 no pix'); ok(pr.price === 899.9 && pr.previous === 1299.9, 'radar: lê "de/por" em reais do texto'); }
+{ const b = W.mapTelegramUpdate({ message: { message_id: 1, chat: { id: -100, type: 'supergroup', title: 'Fonte' }, text: 'Oferta boa', entities: [{ type: 'text_link', url: 'https://s.shopee.com.br/oculto' }], reply_markup: { inline_keyboard: [[{ text: 'Comprar', url: 'https://amzn.to/xyz' }]] }, date: 1760000000 } });
+  ok(/shopee\.com\.br\/oculto/.test(b.body) && /amzn\.to\/xyz/.test(b.body), 'telegram: links escondidos em texto e botões entram no texto capturado'); }
+
+// ---- Radar: resolução de encurtadores (domínios injetados) e fluxo completo
+const shortSrv = await listen(async (req, res) => {
+  if (req.url === '/s1') { res.writeHead(302, { location: 'https://shopee.com.br/Produto-i.9.55' }); return res.end(); }
+  if (req.url === '/s2') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<html><a href="https://www.amazon.com.br/dp/B0TEST0001?tag=outro">x</a></html>'); }
+  if (req.url === '/s3') { res.writeHead(302, { location: 'https://exemplo-malicioso.com/x' }); return res.end(); }
+  if (req.url === '/s4') { res.writeHead(302, { location: 'https://www.magazineluiza.com.br/tv/p/237578300/et/' }); return res.end(); }
+  if (req.url === '/s5') { res.writeHead(302, { location: 'https://shopee.com.br/Outro-i.9.999' }); return res.end(); }
+  send(res, 404, {});
+});
+let rl = await W.resolveLink(ctx, shortSrv.url + '/s1');
+ok(rl.platform === 'shopee' && rl.external_id === '9.55', 'radar: segue o encurtador até a loja');
+rl = await W.resolveLink(ctx, shortSrv.url + '/s2'); ok(rl.platform === 'amazon' && rl.external_id === 'B0TEST0001', 'radar: acha a loja no HTML quando o encurtador não redireciona');
+rl = await W.resolveLink(ctx, shortSrv.url + '/s3'); ok(!rl.platform && /exemplo-malicioso/.test(rl.final_url), 'radar: destino desconhecido não vira oferta (e não é visitado)');
+const cacheKeys = Object.keys(db.linkCache).length; await W.resolveLink(ctx, shortSrv.url + '/s1'); ok(Object.keys(db.linkCache).length === cacheKeys, 'radar: resultado vem do cache na segunda vez');
+{ const hostile = { ...ctx, followHost: undefined }; const r2 = await W.resolveLink(hostile, 'http://127.0.0.1:1/x'); ok(!r2.platform, 'radar: domínio fora da lista nunca é acessado (anti-SSRF)'); }
+
+const src = { id: 'src1', mode: 'review', platforms: [], blocked_words: ['réplica'], min_discount_pct: null, max_per_hour: 20, created_last_hour: 0 };
+const mkMsg = (body, extra = {}) => ({ id: crypto.randomUUID(), body, chat_title: 'Fonte A', channel: 'telegram', source: { ...src, ...extra } });
+const runMsg = async (m, state = { created: {} }) => { db.captured = []; db.offers = []; db.sources = []; db.signals = []; const rt = await (async () => JSON.parse(JSON.stringify(await rpc('get_integration_runtime', {}))))(); return { r: await W.processRadarMessage(ctx, rt, m, state), state }; };
+let o = await runMsg(mkMsg('Caixa de som top! ' + shortSrv.url + '/s1 por R$ 75,00'));
+ok(o.r[0] === 'created' && db.offers.length === 1 && db.captured[0].status === 'offer_created', 'radar: promoção do grupo vira oferta na fila');
+ok(db.offers[0].affiliate_url === 'https://s.shopee.com.br/abc' && db.offers[0].source_layer === 'C' && /Radar: Fonte A/.test(db.offers[0].source_name) && db.offers[0].source_kind === 'api', 'radar: usa o SEU link de afiliado (da API), camada C e origem do grupo');
+ok(db.offers[0].price === 75 && db.offers[0].previous_price === 150 && db.offers[0].title === 'Caixa de Som', 'radar: preço e título vêm da API da loja, não do texto');
+ok(db.offers[0].evidence.fonte === 'Fonte A' && db.sources.length === 1 && db.signals[0].p_commission === 12 && db.signals[0].p_auto_ok === false, 'radar: registra a fonte, a comissão e não aprova sozinho no modo revisão');
+o = await runMsg(mkMsg(shortSrv.url + '/s1', { mode: 'auto' })); ok(db.signals[0].p_auto_ok === true, 'radar: fonte em modo automático marca a oferta como elegível à aprovação automática');
+o = await runMsg(mkMsg('Caixa de som RÉPLICA ' + shortSrv.url + '/s1')); ok(o.r[0] === 'created', 'radar: palavra bloqueada só vale se estiver no título da loja');
+o = await runMsg(mkMsg(shortSrv.url + '/s1', { blocked_words: ['caixa'] })); ok(o.r[0] === 'filtered' && /Palavra bloqueada/.test(db.captured[0].reason) && db.offers.length === 0, 'radar: palavra bloqueada recusa a oferta');
+o = await runMsg(mkMsg(shortSrv.url + '/s1', { platforms: ['amazon'] })); ok(o.r[0] === 'filtered' && /fora das aceitas/.test(db.captured[0].reason), 'radar: loja fora das aceitas pela fonte é recusada');
+o = await runMsg(mkMsg('de R$ 100 por R$ 40 ' + shortSrv.url + '/s1')); ok(o.r[0] === 'filtered' && /acima do anunciado/.test(db.captured[0].reason), 'radar: preço atual maior que o anunciado = promoção encerrada, não publica');
+o = await runMsg(mkMsg(shortSrv.url + '/s1', { min_discount_pct: 70 })); ok(o.r[0] === 'filtered' && /Desconto comprovado abaixo/.test(db.captured[0].reason), 'radar: respeita o desconto mínimo da fonte');
+o = await runMsg(mkMsg(shortSrv.url + '/s5')); ok(o.r[0] === 'ineligible' && /programa de afiliados/.test(db.captured[0].reason), 'radar: produto que não está no seu programa é descartado (nunca usa o link de terceiros)');
+o = await runMsg(mkMsg(shortSrv.url + '/s4')); ok(o.r[0] === 'ineligible' && /Magalu/.test(db.captured[0].reason), 'radar: Magalu (sem API) é descartada com motivo claro');
+o = await runMsg(mkMsg(shortSrv.url + '/s3')); ok(o.r[0] === 'ignored', 'radar: link que não é de loja é ignorado');
+o = await runMsg(mkMsg(shortSrv.url + '/s1', { created_last_hour: 20 })); ok(o.r[0] === 'filtered' && /Limite por hora/.test(db.captured[0].reason), 'radar: limite por hora da fonte é respeitado');
+db.connectors.shopee.mode = 'disabled'; o = await runMsg(mkMsg(shortSrv.url + '/s1')); ok(o.r[0] === 'ineligible' && /desligado/.test(db.captured[0].reason), 'radar: conector desligado não gera oferta'); db.connectors.shopee.mode = 'api_ready';
+o = await runMsg(mkMsg(shortSrv.url + '/s1')); db.offers.push({ ...db.offers[0] }); // simula a mesma oferta já na fila
+o = await (async () => { db.captured = []; const rt = JSON.parse(JSON.stringify(await rpc('get_integration_runtime', {}))); const r = await W.processRadarMessage(ctx, rt, mkMsg(shortSrv.url + '/s1'), { created: {} }); return { r }; })();
+ok(o.r[0] === 'duplicate' && db.captured[0].status === 'duplicate', 'radar: mesmo produto em outra fonte vira "duplicada" (soma como sinal de oferta quente)');
+// fila completa
+db.offers = []; db.captured = [];
+db.radarQueue = [mkMsg('A ' + shortSrv.url + '/s1'), mkMsg('B ' + shortSrv.url + '/s3'), mkMsg('sem link nenhum ainda')];
+{ const r = await W.runRadar(ctx, { max: 10 }); ok(r.messages === 3 && r.created === 1 && r.ignored === 1, 'radar: processa a fila (1 oferta, 1 ignorado)'); }
+ok((await W.runRadar(ctx)).messages === 0, 'radar: fila vazia não faz nada');
+// teste manual de link pelo painel
+db.jobs = []; j = job('integration', null, { provider: 'worker', action: 'radar_test', url: shortSrv.url + '/s1' }); await W.runJobs(ctx);
+ok(j.status === 'done' && j.result.ok === true && j.result.steps.length === 3 && j.result.steps.every((x) => x.ok) && j.result.item.title === 'Caixa de Som', 'painel: "Testar link" mostra cada etapa e o produto');
+j = job('integration', null, { provider: 'worker', action: 'radar_test', url: shortSrv.url + '/s3' }); await W.runJobs(ctx);
+ok(j.status === 'done' && j.result.ok === false && j.result.steps[0].ok === false, 'painel: "Testar link" explica quando não é link de loja');
+shortSrv.s.close();
+
+// ---- Fase 1/2: produtos acompanhados, termos, ordenação
+db.offers = []; db.watchUpdates = [];
+db.watch = [{ id: 'w1', platform: 'shopee', external_id: '9.55', url: 'https://shopee.com.br/x-i.9.55', title: null, target_price: null, min_drop_pct: 10, last_price: 100 }, { id: 'w2', platform: 'shopee', external_id: '9.999', url: 'x', min_drop_pct: 10, last_price: 50 }];
+{ const r = await W.runWatchlist(ctx);
+  ok(r.checked === 2 && r.offers === 1 && db.offers.length === 1 && db.offers[0].previous_price === 100 && db.offers[0].source_name === 'Produto acompanhado', 'acompanhamento: queda de 25% vira oferta com o último preço como referência');
+  ok(db.watchUpdates.find((u) => u.p_id === 'w1').p_offer === true && db.watchUpdates.find((u) => u.p_id === 'w1').p_price === 75 && db.watchUpdates.find((u) => u.p_id === 'w2').p_offer === false, 'acompanhamento: atualiza o último preço e marca quando gerou oferta'); }
+ok(W.selectOffers([{ external_id: 'a', url: 'u', title: 't', price: 10, previous: 20, commission_pct: 3 }, { external_id: 'b', url: 'u', title: 't', price: 10, previous: 12, commission_pct: 12 }], { sort_by: 'commission' }, 5).list[0].external_id === 'b', 'coleta: ordena por comissão quando configurado');
+db.connectors.mercadolivre = { mode: 'api_ready', config: { app_id: '111', categories: ['eletronicos'] } };
+{ const rt2 = JSON.parse(JSON.stringify(await rpc('get_integration_runtime', {}))); rt2.search_terms = { eletronicos: ['meu termo 1', 'meu termo 2'] };
+  const tf = await W.termsForRt(ctx, rt2, 'shopee', { categories: ['eletronicos'] }); ok(tf.map((x) => x.q).join('|') === 'meu termo 1|meu termo 2', 'termos de busca: usa os termos editados no painel em vez dos padrões'); }
+
+// ---- Fase 4/5/6: automação, comissões, alertas, limpeza
+db.autoApproved = 2; { const r = await W.runAutomation(ctx); ok(r.auto.approved === 2, 'automação: executa a aprovação automática e a expiração'); }
+db.commissions = []; { const r = await W.runCommissionSync(ctx); ok(r.synced === 2 && db.commissions[0].sub_id === 'gabc' && db.commissions[0].external_ref === 'cv1' && db.commissions[0].amount === 12.5, 'comissões: sincroniza o relatório da Shopee com o subId'); }
+{ const r = await W.runCommissionSync(ctx); ok(r.skipped === 'intervalo', 'comissões: respeita o intervalo entre sincronizações'); }
+{ const r = await W.runHousekeeping(ctx); ok(r && r.ok === true, 'limpeza: roda na primeira vez'); ok((await W.runHousekeeping(ctx)) === null, 'limpeza: não repete antes do intervalo'); }
+db.snapshot = { pending_old: 2, unknown: 0, failed_24h: 0, review_waiting: 25, destinations_enabled: 1, collect_errors: [{ platform: 'shopee', error: 'assinatura' }] };
+tgs.sent = []; { const r = await W.runAlerts(ctx);
+  ok(r.fired.includes('pending_old') && r.fired.includes('collect') && r.fired.includes('review') && tgs.sent.some((m) => /aguardando há mais de 45 min/.test(m.text)), 'alertas: fila parada, coleta com erro e fila grande avisam o administrador'); }
+tgs.sent = []; { const r = await W.runAlerts(ctx); ok(r.fired.length === 0 && tgs.sent.length === 0, 'alertas: o mesmo problema não repete dentro do intervalo'); }
+db.snapshot = { pending_old: 0, unknown: 0, failed_24h: 0, review_waiting: 0, destinations_enabled: 1, collect_errors: [] }; await W.runAlerts(ctx);
+ok(!db.alertSent.pending_old, 'alertas: problema resolvido limpa o estado (avisa de novo se voltar)');
+
+/* ---------- Conexão gerenciada pelo servidor (worker.env): o painel não pede endereço, instância nem chave ---------- */
+console.log('\n— conexão gerenciada —');
+const MGD = { evolution: { base_url: evoSrv.url, instance: 'central', api_key: EVO_KEY, webhook_url: 'http://promo-worker:8787/hook/whatsapp-abc' },
+  telegram: { bot_token: TG_TOKEN, webhook_url: 'https://worker.exemplo.com/hook/telegram-abc', webhook_secret: 'S'.repeat(48) } };
+const mctx = { ...ctx, managed: MGD };
+const keep = { ev: db.evolution, tg: db.telegram, sec: db.secrets };
+db.evolution = { send_delay_min_s: 1, send_delay_max_s: 1, alerts: true }; db.telegram = { enabled: false, mode: 'polling', alerts: true };
+db.secrets = { ...db.secrets }; delete db.secrets.evolution_api_key; delete db.secrets.telegram_bot_token; delete db.secrets.telegram_webhook_secret;
+db.jobs = []; evo.state = 'close'; evo.webhook = null;
+j = job('integration', 'whatsapp', { provider: 'evolution', action: 'status' }); await W.runJobs(mctx);
+ok(j.status === 'done' && j.result.state === 'close' && j.result.managed.api_key === true && j.result.managed.base_url === true && j.result.managed.instance === true, 'gerenciado: status usa endereço, instância e chave do servidor (banco vazio)');
+ok(evo.webhook && evo.webhook.url === MGD.evolution.webhook_url && j.result.webhook_fixed === true && j.result.webhook.matches === true, 'gerenciado: o webhook da Evolution é corrigido sozinho para o endereço interno do worker');
+ok(!JSON.stringify(j.result).includes(EVO_KEY), 'gerenciado: a chave nunca aparece no resultado');
+j = job('integration', 'whatsapp', { provider: 'evolution', action: 'connect_poll' }); await W.runJobs(mctx);
+ok(j.status === 'done' && j.result.state === 'connecting' && /^data:image\//.test(j.result.qr), 'QR ao vivo: desconectado devolve o QR code para o painel mostrar');
+j = job('integration', 'whatsapp', { provider: 'evolution', action: 'connect_poll', pairing_number: '5511999990001' }); await W.runJobs(mctx);
+ok(j.result.pairing_code === 'ABCD-1234', 'QR ao vivo: também devolve o código de pareamento (conectar sem câmera)');
+evo.state = 'open'; db.jobs = [];
+j = job('integration', 'whatsapp', { provider: 'evolution', action: 'connect_poll' }); await W.runJobs(mctx);
+ok(j.result.state === 'open' && j.result.phone === '5511999990001' && !j.result.qr, 'QR ao vivo: depois de ler o QR devolve "conectado" com o número');
+ok(db.status.evolution.state === 'open' && db.status.evolution.managed.api_key === true, 'QR ao vivo: grava o estado conectado para o painel');
+evo.state = 'close';
+
+j = job('integration', 'telegram', { provider: 'telegram', action: 'connect' }); await W.runJobs(mctx);
+ok(j.status === 'done' && j.result.connected === true && j.result.bot_username === 'central_bot', 'Telegram: "Conectar" confere o bot com o token do servidor');
+ok(tgs.webhook && tgs.webhook.url === MGD.telegram.webhook_url && tgs.webhook.secret_token === 'S'.repeat(48), 'Telegram: registra o webhook público com o segredo derivado (sem digitar nada)');
+ok(JSON.stringify(db.savedInt.at(-1).p_config) === JSON.stringify({ enabled: true, mode: 'webhook', webhook_url: MGD.telegram.webhook_url }), 'Telegram: deixa o bot ativo e em modo webhook no banco');
+ok(db.status.telegram.managed.token === true && db.status.telegram.managed.webhook === true, 'Telegram: o painel sabe que o token vem do servidor');
+{ const w1 = await W.handleTelegramWebhook(mctx, { 'x-telegram-bot-api-secret-token': 'S'.repeat(48) }, { update_id: 1, message: { message_id: 1, chat: { id: -1, type: 'group', title: 'G' }, text: 'oi', date: 1760000000 } });
+  const w2 = await W.handleTelegramWebhook(mctx, { 'x-telegram-bot-api-secret-token': 'outro' + 'x'.repeat(30) }, { update_id: 2 });
+  ok(w1.ok === true && w2.status === 401, 'Telegram: o webhook aceita só o segredo derivado do servidor'); }
+{ const noPub = { ...mctx, managed: { ...MGD, telegram: { ...MGD.telegram, webhook_url: '' } } }; tgs.webhook = { url: 'https://velho.exemplo.com/x' };
+  j = job('integration', 'telegram', { provider: 'telegram', action: 'connect' }); await W.runJobs(noPub);
+  ok(j.status === 'done' && tgs.webhook === null && db.savedInt.at(-1).p_config.mode === 'polling', 'Telegram: sem endereço público usa consulta (polling) e remove webhook antigo'); }
+{ const semToken = { ...ctx, managed: { evolution: {}, telegram: {} } }; db.jobs = [];
+  j = job('integration', 'telegram', { provider: 'telegram', action: 'connect' }); await W.runJobs(semToken);
+  ok(j.status === 'failed' && /TELEGRAM_BOT_TOKEN/.test(j.error), 'Telegram: sem token em lugar nenhum explica onde colocar'); }
+db.evolution = keep.ev; db.telegram = keep.tg; db.secrets = keep.sec; db.jobs = [];
 
 for (const s of [evoSrv, tgSrv, ml, shopee, ali, amz]) s.s.close();
 // ---- porteiro dos webhooks de entrada ----

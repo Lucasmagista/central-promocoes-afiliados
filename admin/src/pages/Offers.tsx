@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Download, Search, Tag, XCircle } from 'lucide-react';
 import { api } from '../lib/api';
+import { ProductImage } from '../ui/ProductImage';
 import { useSession } from '../session';
 import { money, ago, offerStatusLabel, platformName } from '../lib/format';
 import { Button, Card, Empty, ErrorBox, Loading, PageHead, Pager, Th, useAction, useDialogs, useLoad, useSelection, useTable } from '../ui/ui';
@@ -57,7 +58,7 @@ export default function Offers() {
             <Th t={t} k="score">Score</Th><Th t={t} k="title">Oferta</Th><Th t={t} k="platform">Plataforma</Th><Th t={t} k="price">Preço</Th><Th t={t} k="status">Status</Th><Th t={t} k="seen">Visto</Th></tr></thead>
             <tbody>{t.rows.map((o) => <tr key={o.id} className="click" tabIndex={0} onClick={() => setOpen(o.id)} onKeyDown={(e) => e.key === 'Enter' && setOpen(o.id)}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Selecionar ${o.title}`} checked={sel.has(o.id)} onChange={() => sel.toggle(o.id)} /></td>
-              <td><Score v={o.score} /></td><td style={{ maxWidth: 380 }}><div className="truncate" style={{ fontWeight: 600 }}>{o.title}</div><div className="small muted">{o.category ?? 'Sem categoria'}</div></td>
+              <td><Score v={o.score} /></td><td style={{ maxWidth: 400 }}><div className="row" style={{ gap: 10 }}><ProductImage src={o.image_url} size={44} /><div style={{ minWidth: 0 }}><div className="truncate" style={{ fontWeight: 600 }}>{o.title}</div><div className="small muted">{o.category ?? 'Sem categoria'}</div></div></div></td>
               <td><PlatformTag p={o.platform} /></td><td className="nowrap"><b>{money(o.current_price)}</b>{o.discount_pct != null && <div className="small up">-{o.discount_pct}%</div>}</td>
               <td><OfferStatus s={o.status} /></td><td className="small muted nowrap">{ago(o.price_observed_at)}</td></tr>)}</tbody></table></div>
           <Pager t={t} label="ofertas" /></>}

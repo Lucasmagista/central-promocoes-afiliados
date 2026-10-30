@@ -53,7 +53,7 @@ function Operacao({ s, reload }: { s: SettingsMap; reload: () => void }) {
           <Button variant={paused ? 'primary' : 'danger'} icon={paused ? <PlayCircle size={15} /> : <PauseCircle size={15} />} onClick={togglePause}>{paused ? 'Retomar envios' : 'Pausar todos os envios'}</Button></div></Card>
       <div className="grid g2">
         <Card title="Frescor do preço"><div className="col"><Field label="Idade máxima do preço (minutos)" hint="Ofertas com preço mais velho que isso não são aprovadas nem publicadas."><input type="number" min={5} value={age} onChange={(e) => setAge(+e.target.value)} /></Field><div><Save1 k="max_price_age_minutes" value={age} saved={s.max_price_age_minutes} onSaved={reload} /></div></div></Card>
-        <Card title="Link curto / redirecionador"><div className="col"><Field label="URL base" hint="Ex.: https://go.seudominio.com.br. Vazio desliga o link curto."><input value={base} onChange={(e) => setBase(e.target.value)} placeholder="https://" /></Field><div><Save1 k="shortlink_base" value={base} saved={s.shortlink_base ?? ''} onSaved={reload} /></div></div></Card>
+        <Card title="Link curto / redirecionador"><div className="col"><Field label="URL base" hint="Use o do worker: https://worker.hubly.software/r (o link fica .../r/código). Vazio desliga o link curto."><input value={base} onChange={(e) => setBase(e.target.value)} placeholder="https://" /></Field><div><Save1 k="shortlink_base" value={base} saved={s.shortlink_base ?? ''} onSaved={reload} /></div></div></Card>
       </div>
     </div>);
 }
@@ -114,7 +114,7 @@ export default function SettingsPage() {
           {tab === 'whatsapp' && <WhatsAppTab {...props} />}
           {tab === 'telegram' && <TelegramTab {...props} />}
           {tab === 'worker' && <WorkerTab {...props} />}
-          {tab === 'banco' && <DatabaseTab isAdmin={isAdmin} />}
+          {tab === 'banco' && <DatabaseTab isAdmin={isAdmin} s={s} />}
           {tab === 'compliance' && <fieldset disabled={!isAdmin} className="bare"><Compliance s={s} reload={reload} /></fieldset>}
           {tab === 'avancado' && <Avancado s={s} />}
         </div>

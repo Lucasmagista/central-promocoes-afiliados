@@ -5,6 +5,7 @@ import type {
   PriceObservation, Profile, Publication, Role, Run, SettingsMap, Template,
   SecretInfo, Channel, ChannelOverview, Chat, ChatDetail, ChatFilter, ChatMessage, OutboxItem, Participant,
   ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion,
+  PromoSource, CapturedLink, RoutingRule, WatchItem, CommissionSummary,
 } from './types';
 
 type Row = Record<string, any>;
@@ -27,13 +28,13 @@ function mapOffer(r: Row): Offer {
 function mapPublication(r: Row): Publication {
   const clicks = (r.short_links ?? []).reduce((a: number, s: Row) => a + (s.click_events?.[0]?.count ?? 0), 0);
   return {
-    ...r, offer_title: r.offers?.products?.title ?? '—', is_simulated: !!r.offers?.is_simulated,
+    ...r, offer_title: r.offers?.products?.title ?? '—', is_simulated: !!r.offers?.is_simulated, offer_image: r.offers?.products?.image_url ?? null,
     destination_name: r.destinations?.name ?? '—', channel: r.destinations?.channel, clicks,
   } as Publication;
 }
 
 const PUB_SELECT =
-  '*, offers!inner(is_simulated, products!inner(title)), destinations!inner(name, channel), short_links(click_events(count))';
+  '*, offers!inner(is_simulated, products!inner(title, image_url)), destinations!inner(name, channel), short_links(click_events(count))';
 
 export function createSupabaseApi(url: string, anonKey: string): Api {
   const sb: SupabaseClient = createClient(url, anonKey, { auth: { persistSession: true, autoRefreshToken: true } });
@@ -188,6 +189,24 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
       fail(error);
       return (data ?? []).map((r: Row) => ({ ...r, platform: r.connectors?.platform ?? '—' })) as Run[];
     },
+
+    async listPromoSources() { return (await rpc<PromoSource[]>('list_promo_sources')) ?? []; },
+    async savePromoSource(chatId, cfg) { return rpc<string>('save_promo_source', { p_chat: chatId, p_config: cfg }); },
+    async deletePromoSource(chatId) { await rpc('delete_promo_source', { p_chat: chatId }); },
+    async listCapturedLinks(limit = 100) { return (await rpc<CapturedLink[]>('list_captured_links', { p_limit: limit })) ?? []; },
+    async listRoutingRules() {
+      const { data, error } = await sb.from('routing_rules').select('*').order('priority').order('created_at');
+      fail(error); return (data ?? []) as RoutingRule[];
+    },
+    async saveRoutingRule(id, cfg) { return rpc<string>('save_routing_rule', { p_id: id, p_config: cfg }); },
+    async deleteRoutingRule(id) { await rpc('delete_routing_rule', { p_id: id }); },
+    async listWatchItems() {
+      const { data, error } = await sb.from('watchlist').select('*').order('created_at', { ascending: false });
+      fail(error); return (data ?? []).map((r: Row) => ({ ...r, target_price: r.target_price == null ? null : Number(r.target_price), last_price: r.last_price == null ? null : Number(r.last_price), min_drop_pct: Number(r.min_drop_pct) })) as WatchItem[];
+    },
+    async saveWatchItem(url, target, drop) { return rpc<string>('save_watch_item', { p_url: url, p_target: target, p_drop: drop }); },
+    async deleteWatchItem(id) { await rpc('delete_watch_item', { p_id: id }); },
+    commissionSummary: (days = 30) => rpc<CommissionSummary>('commission_summary', { p_days: days }),
 
     async listTemplates() {
       const { data, error } = await sb.from('templates').select('*').order('channel');

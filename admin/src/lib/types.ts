@@ -85,6 +85,7 @@ export interface Publication {
   created_at: string;
   clicks: number;
   is_simulated: boolean;
+  offer_image?: string | null;
 }
 
 export interface Destination {
@@ -280,6 +281,23 @@ export interface ConnectorConfig {
   min_discount_pct?: number; min_score?: number; min_price?: number; max_price?: number; categories?: string[];
   sources?: { name: string; url: string }[]; keywords?: string[]; link_template?: string; [k: string]: unknown;
 }
+
+/* ---------- Radar, automação e acompanhamento (016) ---------- */
+export interface PromoSource {
+  id: string; chat_id: string; title: string; channel: Channel; kind: ChatKind; we_are_admin: boolean; enabled: boolean; mode: 'review' | 'auto'; platforms: string[];
+  min_discount_pct: number | null; blocked_words: string[]; max_per_hour: number; notes: string | null;
+  seen_7d: number; offers_7d: number; duplicates_7d: number; ineligible_7d: number; published_7d: number; clicks_7d: number;
+}
+export interface PromoSourceInput { enabled?: boolean; mode?: 'review' | 'auto'; platforms?: string[]; min_discount_pct?: number | null; blocked_words?: string[]; max_per_hour?: number; notes?: string | null }
+export interface CapturedLink {
+  id: number; created_at: string; status: 'new' | 'ineligible' | 'offer_created' | 'duplicate' | 'filtered' | 'error' | 'ignored'; reason: string | null; platform: string | null; original_url: string;
+  source_title: string | null; channel: Channel | null; product_title: string | null; offer_id: string | null; offer_status: string | null; score: number | null; image_url?: string | null;
+}
+export interface RoutingRule { id: string; name: string; enabled: boolean; priority: number; platforms: string[]; categories: string[]; min_score: number; min_discount_pct: number; destinations: string[]; auto_approve: boolean }
+export type RoutingRuleInput = Omit<RoutingRule, 'id'>;
+export interface WatchItem { id: string; platform: string; external_id: string; url: string; title: string | null; target_price: number | null; min_drop_pct: number; active: boolean; last_price: number | null; last_checked_at: string | null; last_offer_at: string | null; created_at: string; image_url?: string | null }
+export interface CommissionSummary { total: number; orders: number; by_platform: { platform: string; amount: number; orders: number }[]; by_day: { day: string; amount: number }[]; by_sub: { sub_id: string; destination: string | null; amount: number; orders: number }[] }
+export interface RadarTestResult { ok: boolean; steps: { label: string; ok: boolean; detail: string }[]; final_url?: string; platform?: string | null; external_id?: string | null; item?: StoreProduct; affiliate_ok?: boolean }
 
 /* ---------- Contas de afiliado (012) ---------- */
 export interface StoreProduct { title: string; price: number; previous: number | null; discount_pct: number | null; url: string; image: string | null; seller: string | null; commission_pct: number | null; free_shipping?: boolean }

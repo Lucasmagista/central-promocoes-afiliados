@@ -25,6 +25,7 @@ export interface RenderContext {
 }
 
 /** Réplica fiel da regra do banco: linha com variável vazia é descartada; aviso de afiliado é sempre garantido. */
+const spin = (t: string) => t.replace(/\[\[([^\[\]]+)\]\]/g, (_m, g: string) => { const o = g.split("|"); return o[Math.floor(Math.random() * o.length)]; });
 export function renderTemplate(body: string, channel: Channel, ctx: RenderContext): string {
   const o = ctx.offer;
   const discount = o.discount_pct != null ? String(+o.discount_pct) : '';
@@ -45,7 +46,7 @@ export function renderTemplate(body: string, channel: Channel, ctx: RenderContex
   };
   const escape = channel === 'telegram';
   const out: string[] = [];
-  for (const line of body.split('\n')) {
+  for (const line of spin(body).split('\n')) {
     let drop = false;
     let res = line;
     for (const m of new Set([...line.matchAll(/\{\{([a-z_]+)\}\}/g)].map((x) => x[1]))) {

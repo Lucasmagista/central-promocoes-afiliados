@@ -1,6 +1,6 @@
 import type { Api, SessionState } from './api';
 import type {
-  Alert, Analytics, AuditEvent, Connector, DashboardSummary, Destination, IngestInput, IngestResult, Offer,
+  PromoSource, CapturedLink, RoutingRule, WatchItem, Alert, Analytics, AuditEvent, Connector, DashboardSummary, Destination, IngestInput, IngestResult, Offer,
   OfferDetail, PriceObservation, Profile, Publication, Role, Run, ScoreReason, SettingsMap, Template,
   ChannelJob, DiscoveredGroup, TemplateVersion, SecretInfo, SecretKey, IntProvider,
 } from './types';
@@ -109,7 +109,7 @@ function seed(): DemoState {
     else reasons.push({ code: 'link', points: 0, label: 'Link de afiliado ausente ou não confirmado' });
     const status = statuses[i] ?? 'published';
     offers.push({
-      id, product_id: productId, status, platform, title, category, image_url: null, seller_name: i % 3 === 0 ? 'Loja Oficial' : null,
+      id, product_id: productId, status, platform, title, category, image_url: demoImg(title), seller_name: i % 3 === 0 ? 'Loja Oficial' : null,
       source_layer: src === 'api' ? 'B' : src === 'feed' ? 'C' : 'A', source_name: src ? (src === 'api' ? 'API oficial' : src === 'feed' ? 'Feed de ofertas' : 'Histórico') : 'Manual',
       original_url: `https://${HOSTS[platform]}/${slug(title)}-i.${100 + i}.${900 + i}`,
       affiliate_url: hasLink ? `https://${HOSTS[platform]}/aff/${slug(title).slice(0, 12)}${i}` : null,
@@ -131,7 +131,7 @@ function seed(): DemoState {
   const publications: Publication[] = [];
   const mkPub = (offer: Offer, dest: Destination, status: Publication['status'], minsAgo: number, extra: Partial<Publication> = {}) => {
     publications.push({
-      id: uid(), offer_id: offer.id, destination_id: dest.id, offer_title: offer.title, destination_name: dest.name, channel: dest.channel,
+      id: uid(), offer_id: offer.id, destination_id: dest.id, offer_title: offer.title, offer_image: offer.image_url, destination_name: dest.name, channel: dest.channel,
       status, rendered_text: '', attempt_count: status === 'pending' ? 0 : 1, scheduled_for: iso(-minsAgo * MIN), next_attempt_at: iso(-minsAgo * MIN),
       last_error_code: null, note: null, external_message_id: status === 'sent' ? `${Math.floor(r() * 9000 + 1000)}` : null,
       sent_at: status === 'sent' ? iso(-minsAgo * MIN) : null, created_at: iso(-(minsAgo + 5) * MIN),
@@ -192,6 +192,16 @@ function seed(): DemoState {
 }
 
 const ERR = (m: string): never => { throw new Error(m); };
+const DAY_MS = 86_400_000; void DAY_MS;
+
+
+/** Imagem de demonstração (SVG embutido) para ver as miniaturas sem depender de internet. */
+function demoImg(seed: string): string {
+  let h = 0; for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = h % 360; const ini = seed.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="hsl(${hue},55%,45%)"/><circle cx="40" cy="34" r="16" fill="hsla(${hue},70%,85%,.55)"/><text x="40" y="66" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">${ini}</text></svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+}
 
 export function createDemoApi(): Api {
   const s = seed();
@@ -241,18 +251,25 @@ export function createDemoApi(): Api {
     const evo = s.settings.int_evolution as Record<string, unknown>, tg = s.settings.int_telegram as Record<string, unknown>;
     const report = (k: IntProvider, v: Record<string, unknown>) => { s.settings[`int_status_${k}`] = { ...v, checked_at: iso(0) }; };
     if (provider === 'evolution') {
-      if (!evo.base_url || !secret('evolution_api_key')) ERR('Informe o endereço da Evolution e a chave de acesso (aba WhatsApp).');
+      // demonstração: a conexão vem do servidor (worker.env), como em produção
       const open = () => evoOpenAt > 0 && Date.now() > evoOpenAt;
-      const status = () => { const st: Record<string, unknown> = { reachable: true, ms: 84, version: '2.3.7', instance: evo.instance || null }; if (evo.instance) { st.state = evoOpenAt === 0 ? 'close' : open() ? 'open' : 'connecting'; if (open()) { st.phone = '5511999990001'; st.profile = 'Hubly Ofertas'; } st.webhook = { enabled: !!evo.webhook_url, url: evo.webhook_url || '', matches: true }; } return st; };
+      const status = () => { const st: Record<string, unknown> = { reachable: true, ms: 84, version: '2.3.7', instance: evo.instance || 'central-ofertas', host: 'whatsapp.hubly.software', managed: { base_url: true, instance: true, api_key: true, webhook: true } }; { st.state = evoOpenAt === 0 ? 'close' : open() ? 'open' : 'connecting'; if (open()) { st.phone = '5511999990001'; st.profile = 'Hubly Ofertas'; } st.webhook = { enabled: true, url: 'http://promo-worker:8787/hook/whatsapp-…', matches: true }; } return st; };
       if (action === 'status') { const st = status(); report('evolution', st); return st; }
       if (action === 'list_instances') return { instances: evo.instance ? [{ name: evo.instance, state: status().state }] : [] };
-      if (!evo.instance) ERR('Defina o nome da instância antes.');
       if (action === 'create_instance') return { created: true };
+      if (action === 'connect_poll') { if (open()) { const st = status(); report('evolution', st); return { state: 'open', phone: st.phone, profile: st.profile }; } if (evoOpenAt === 0 || Date.now() - evoOpenAt > 60000) evoOpenAt = Date.now() + 9000; return { state: 'connecting', qr: qrSvg(), pairing_code: p.pairing_number ? 'HUB1-2026' : null }; }
       if (action === 'connect') { if (open()) return { state: 'open', already: true }; evoOpenAt = Date.now() + 9000; return { state: 'connecting', qr: qrSvg(), pairing_code: p.pairing_number ? 'HUB1-2026' : null }; }
       if (action === 'restart') return { restarted: true };
       if (action === 'logout') { evoOpenAt = 0; return { logged_out: true }; }
-      if (action === 'set_webhook') { if (!evo.webhook_url) ERR('Informe o endereço do webhook do worker (aba WhatsApp).'); return { webhook: { enabled: true, url: evo.webhook_url } }; }
+      if (action === 'set_webhook') return { webhook: { enabled: true, url: 'http://promo-worker:8787/hook/whatsapp-…' } };
       if (action === 'send_test') { return { sent: true, message_id: 'DEMO' + Date.now() }; }
+    }
+    if (provider === 'worker' && action === 'radar_test') {
+      const u = String(p.url ?? ''); const shop = /shopee|shp\.ee/.test(u); const amz = /amazon|amzn/.test(u);
+      if (!shop && !amz) return { ok: false, steps: [{ label: 'Seguir o link até a loja', ok: false, detail: 'Não é um link de produto de uma loja suportada' }], final_url: u, platform: null, external_id: null };
+      return { ok: true, platform: shop ? 'shopee' : 'amazon', external_id: shop ? '9.55' : 'B09B8V1LZ3', final_url: u,
+        steps: [{ label: 'Seguir o link até a loja', ok: true, detail: shop ? 'Shopee · produto 9.55' : 'Amazon · produto B09B8V1LZ3' }, { label: 'Consultar o produto na API da loja', ok: true, detail: 'Caixa de som portátil · R$ 74,90 (antes R$ 149,80)' }, { label: 'Gerar o seu link de afiliado', ok: true, detail: shop ? 's.shopee.com.br/…/abc' : 'amazon.com.br/dp/…?tag=lucas-20' }],
+        item: { title: 'Caixa de som portátil à prova d’água', price: 74.9, previous: 149.8, discount_pct: 50, url: u, image: null, seller: null, commission_pct: shop ? 12 : null }, affiliate_ok: true };
     }
     if (provider === 'worker') {
       if (action === 'selftest') {
@@ -278,9 +295,10 @@ export function createDemoApi(): Api {
       if (action === 'run_sender') { if (s.settings.paused) ERR('Envios pausados: retome antes de rodar o ciclo de envio'); return { sender: { sent: 0, failed: 0, unknown: 0 } }; }
     }
     if (provider === 'telegram') {
-      if (!secret('telegram_bot_token')) ERR('Informe o token do bot (aba Telegram).');
+      const managedTg = { token: true, webhook: true };
       const live = tg.mode === 'webhook' && tg.webhook_url ? 'webhook' : 'polling';
-      if (action === 'check') { const st = { ok: true, bot_username: 'central_ofertas_bot', bot_name: 'Central de Ofertas', can_join_groups: true, mode_live: live, webhook: live === 'webhook' ? { url: tg.webhook_url, pending: 0, last_error: null, last_error_at: null } : null }; report('telegram', st); return st; }
+      if (action === 'connect') { tg.enabled = true; tg.mode = 'webhook'; tg.webhook_url = 'https://worker.hubly.software/hook/telegram-…'; const st = { ok: true, bot_username: 'central_ofertas_bot', bot_name: 'Central de Ofertas', can_join_groups: true, mode_live: 'webhook', managed: managedTg, webhook: { url: tg.webhook_url, pending: 0, last_error: null, last_error_at: null } }; report('telegram', st); return { ...st, connected: true }; }
+      if (action === 'check') { const st = { ok: true, managed: managedTg, bot_username: 'central_ofertas_bot', bot_name: 'Central de Ofertas', can_join_groups: true, mode_live: live, webhook: live === 'webhook' ? { url: tg.webhook_url, pending: 0, last_error: null, last_error_at: null } : null }; report('telegram', st); return st; }
       if (action === 'set_webhook') { if (!tg.webhook_url) ERR('Informe o endereço do webhook (aba Telegram).'); if (!secret('telegram_webhook_secret')) ERR('Gere o segredo do webhook antes.'); return { webhook: { url: tg.webhook_url, pending: 0, last_error: null } }; }
       if (action === 'delete_webhook') return { webhook: null };
       if (action === 'send_test') return { sent: true, message_id: 4242 };
@@ -323,6 +341,19 @@ export function createDemoApi(): Api {
     ERR('Ação não suportada');
     return {};
   };
+  const promoSources: PromoSource[] = [
+    { id: 'ps1', chat_id: 'demo-fonte-1', title: 'Promoções Tech BR (fonte)', channel: 'telegram', kind: 'group', we_are_admin: false, enabled: true, mode: 'review', platforms: ['shopee', 'amazon'], min_discount_pct: 20, blocked_words: ['réplica'], max_per_hour: 20, notes: null, seen_7d: 148, offers_7d: 31, duplicates_7d: 22, ineligible_7d: 64, published_7d: 12, clicks_7d: 187 },
+    { id: 'ps2', chat_id: 'demo-fonte-2', title: 'Achadinhos do Dia (fonte)', channel: 'whatsapp', kind: 'group', we_are_admin: false, enabled: true, mode: 'review', platforms: [], min_discount_pct: null, blocked_words: [], max_per_hour: 10, notes: null, seen_7d: 76, offers_7d: 9, duplicates_7d: 31, ineligible_7d: 28, published_7d: 4, clicks_7d: 41 },
+  ];
+  const capturedLinks: CapturedLink[] = [
+    { id: 5, created_at: iso(-4 * 60_000), status: 'offer_created', reason: 'Score 88', platform: 'shopee', original_url: 'https://s.shopee.com.br/abc123', source_title: 'Promoções Tech BR (fonte)', channel: 'telegram', product_title: 'Caixa de Som Bluetooth 20W', image_url: demoImg('Caixa de Som Bluetooth 20W'), offer_id: 'x', offer_status: 'needs_review', score: 88 },
+    { id: 4, created_at: iso(-9 * 60_000), status: 'ineligible', reason: 'Produto não encontrado no seu programa de afiliados (não dá para gerar o seu link)', platform: 'shopee', original_url: 'https://shp.ee/xyz', source_title: 'Achadinhos do Dia (fonte)', channel: 'whatsapp', product_title: null, offer_id: null, offer_status: null, score: null },
+    { id: 3, created_at: iso(-16 * 60_000), status: 'duplicate', reason: 'Já está na fila', platform: 'amazon', original_url: 'https://amzn.to/3abcd', source_title: 'Promoções Tech BR (fonte)', channel: 'telegram', product_title: 'Echo Dot 5ª geração', image_url: demoImg('Echo Dot 5ª geração'), offer_id: 'y', offer_status: 'needs_review', score: 91 },
+    { id: 2, created_at: iso(-31 * 60_000), status: 'filtered', reason: 'Preço atual (R$ 129) acima do anunciado (R$ 89): promoção encerrada?', platform: 'amazon', original_url: 'https://amzn.to/4zzz', source_title: 'Achadinhos do Dia (fonte)', channel: 'whatsapp', product_title: null, offer_id: null, offer_status: null, score: null },
+    { id: 1, created_at: iso(-55 * 60_000), status: 'ignored', reason: 'Link que não é de uma loja suportada', platform: null, original_url: 'https://exemplo.com/promo', source_title: 'Promoções Tech BR (fonte)', channel: 'telegram', product_title: null, offer_id: null, offer_status: null, score: null },
+  ];
+  const rules: RoutingRule[] = [{ id: 'r1', name: 'Eletrônicos → Telegram principal', enabled: true, priority: 10, platforms: [], categories: ['eletronicos', 'informatica'], min_score: 60, min_discount_pct: 15, destinations: [], auto_approve: false }];
+  const watchItems: WatchItem[] = [{ id: 'w1', platform: 'amazon', external_id: 'B09B8V1LZ3', url: 'https://www.amazon.com.br/dp/B09B8V1LZ3', title: 'Echo Dot 5ª geração', target_price: 229, min_drop_pct: 10, active: true, last_price: 249.9, last_checked_at: iso(-12 * 60_000), last_offer_at: null, created_at: iso(-2 * DAY) }];
   const createdGroups: number[] = [];
   const gflags: Record<string, { only_admins_send: boolean; lock_info: boolean; ephemeral_seconds: number; invite: string }> = {};
   const now = () => Date.now();
@@ -522,7 +553,7 @@ export function createDemoApi(): Api {
         if (s.publications.some((p) => p.offer_id === id && p.destination_id === did)) continue;
         const text = render(o, d, uid().slice(0, 8));
         const v = violations(text); if (v.length) ERR(`Texto contém termos proibidos: ${v.join(', ')}`);
-        s.publications.unshift({ id: uid(), offer_id: id, destination_id: did, offer_title: o.title, destination_name: d.name, channel: d.channel, status: 'pending', rendered_text: text, attempt_count: 0, scheduled_for: when ?? iso(0), next_attempt_at: when ?? iso(0), last_error_code: null, note: null, external_message_id: null, sent_at: null, created_at: iso(0), clicks: 0, is_simulated: o.is_simulated });
+        s.publications.unshift({ id: uid(), offer_id: id, destination_id: did, offer_title: o.title, offer_image: o.image_url, destination_name: d.name, channel: d.channel, status: 'pending', rendered_text: text, attempt_count: 0, scheduled_for: when ?? iso(0), next_attempt_at: when ?? iso(0), last_error_code: null, note: null, external_message_id: null, sent_at: null, created_at: iso(0), clicks: 0, is_simulated: o.is_simulated });
         n++;
       }
       o.status = 'scheduled'; o.approved_at = iso(0);
@@ -780,6 +811,31 @@ export function createDemoApi(): Api {
       const j: ChannelJob = { id: uid(), kind: 'integration', channel: null, payload: { provider: 'database', action: 'apply_migrations' }, status: 'done', result: { applied: [], up_to_date: true }, last_error: null, requested_at: iso(0), finished_at: iso(0) }; jobs.push(j); audit('database_migration_requested', 'integration', 'supabase'); return wait(j.id, 60);
     },
 
+    async listPromoSources() { return wait(promoSources); },
+    async savePromoSource(chatId, cfg) {
+      needAdmin(); const chat = chats.chats.find((c) => c.id === chatId) ?? ERR('Grupo desconhecido');
+      if (s.destinations.some((d) => d.channel === chat.channel && d.external_id === chat.external_id)) ERR('Este grupo é um dos seus destinos: não pode ser fonte do Radar (evita repostar as próprias ofertas)');
+      const cur = promoSources.find((x) => x.chat_id === chatId);
+      const next = { id: cur?.id ?? uid(), chat_id: chatId, title: chat.title, channel: chat.channel, kind: chat.kind, we_are_admin: chat.we_are_admin, enabled: cfg.enabled ?? cur?.enabled ?? true, mode: cfg.mode ?? cur?.mode ?? 'review', platforms: cfg.platforms ?? cur?.platforms ?? [],
+        min_discount_pct: cfg.min_discount_pct === undefined ? cur?.min_discount_pct ?? null : cfg.min_discount_pct, blocked_words: cfg.blocked_words ?? cur?.blocked_words ?? [], max_per_hour: cfg.max_per_hour ?? cur?.max_per_hour ?? 20, notes: cfg.notes ?? cur?.notes ?? null,
+        seen_7d: cur?.seen_7d ?? 0, offers_7d: cur?.offers_7d ?? 0, duplicates_7d: cur?.duplicates_7d ?? 0, ineligible_7d: cur?.ineligible_7d ?? 0, published_7d: cur?.published_7d ?? 0, clicks_7d: cur?.clicks_7d ?? 0 };
+      if (cur) Object.assign(cur, next); else promoSources.push(next);
+      audit('promo_source_saved', 'promo_source', next.id); return wait(next.id, 120);
+    },
+    async deletePromoSource(chatId) { needAdmin(); const i = promoSources.findIndex((x) => x.chat_id === chatId); if (i >= 0) promoSources.splice(i, 1); await wait(null, 80); },
+    async listCapturedLinks() { return wait(capturedLinks); },
+    async listRoutingRules() { return wait(rules); },
+    async saveRoutingRule(id, cfg) { needAdmin(); if (!cfg.name || cfg.name.trim().length < 2) ERR('Dê um nome à regra'); const cur = id ? rules.find((r) => r.id === id) : null; if (cur) Object.assign(cur, cfg); else { const n = { id: uid(), ...cfg }; rules.push(n); id = n.id; } rules.sort((a, b) => a.priority - b.priority); await wait(null, 100); return id as string; },
+    async deleteRoutingRule(id) { needAdmin(); const i = rules.findIndex((r) => r.id === id); if (i >= 0) rules.splice(i, 1); await wait(null, 80); },
+    async listWatchItems() { return wait(watchItems); },
+    async saveWatchItem(url, target, drop) {
+      needOp(); const m = /(shopee|amazon|aliexpress|mercadolivre|magazineluiza)\.com/.exec(url) ?? ERR('Endereço fora dos domínios permitidos das lojas');
+      const platform = m[1] === 'magazineluiza' ? 'magalu' : m[1]; const id = uid();
+      watchItems.unshift({ id, platform, external_id: String(Math.floor(Math.random() * 1e9)), url, title: null, target_price: target, min_drop_pct: drop ?? 10, active: true, last_price: null, last_checked_at: null, last_offer_at: null, created_at: iso(0) });
+      return wait(id, 120);
+    },
+    async deleteWatchItem(id) { needOp(); const i = watchItems.findIndex((w) => w.id === id); if (i >= 0) watchItems.splice(i, 1); await wait(null, 80); },
+    async commissionSummary() { return wait({ total: 312.4, orders: 21, by_platform: [{ platform: 'shopee', amount: 312.4, orders: 21 }], by_day: [], by_sub: s.destinations.slice(0, 2).map((d, i) => ({ sub_id: 'g' + (i + 1) + 'abc', destination: d.name, amount: i ? 92.4 : 220, orders: i ? 6 : 15 })) }); },
     listConnectors: () => wait(s.connectors),
     async saveConnector(id, patch) {
       needAdmin(); const c = s.connectors.find((x) => x.id === id) ?? ERR('Conector inexistente');

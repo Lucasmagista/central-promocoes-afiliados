@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
+import { ProductImage } from '../ui/ProductImage';
 import { useSession } from '../session';
 import { money, dateFull, ago, sourceLabel, pct } from '../lib/format';
 import { Badge, Button, Drawer, ErrorBox, Loading, useAction, useDialogs, useLoad } from '../ui/ui';
@@ -25,6 +26,7 @@ export function OfferDrawer({ id, onClose, onChanged }: { id: string; onClose: (
                   if (r && await run('rej', () => api().rejectOffer(o.id, r), 'Oferta rejeitada')) changed(); }}>Rejeitar</Button></>}</> : undefined} title={o ? <div className="col" style={{ gap: 6 }}><div className="row wrap"><OfferStatus s={o.status} /><PlatformTag p={o.platform} />{o.is_simulated && <Badge tone="info">Simulada</Badge>}</div><h2 style={{ fontSize: 17 }}>{o.title}</h2></div> : 'Oferta'}>
       {q.loading && !q.data ? <Loading /> : q.error ? <ErrorBox error={q.error} retry={q.reloadLoud} /> : o && q.data && (
         <div className="col" style={{ gap: 20 }}>
+          {o.image_url && <div style={{ display: 'flex', justifyContent: 'center' }}><ProductImage src={o.image_url} size={160} radius={14} alt={o.title} /></div>}
           <div className="row wrap" style={{ gap: 20 }}>
             <div><div className="small muted">Preço</div><div style={{ fontSize: 28, fontWeight: 700 }}>{money(o.current_price)}</div></div>
             {o.previous_price != null && <div><div className="small muted">Anterior ({o.previous_price_source === 'own_history' ? 'histórico próprio' : 'fonte oficial'})</div><div style={{ fontSize: 18 }}>{money(o.previous_price)} <Badge tone="ok">-{pct(o.discount_pct, 1)}</Badge></div></div>}

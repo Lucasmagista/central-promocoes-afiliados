@@ -7,6 +7,7 @@ import { previewHtml } from '../lib/template';
 import { channelName, int } from '../lib/format';
 import type { Channel, Chat, ChatKind, ChatMessage } from '../lib/types';
 import GroupManager from '../components/GroupManager';
+import { ConnectWhatsAppModal } from '../components/WhatsAppConnect';
 import { Avatar, Badge, Button, Empty, ErrorBox, Kbd, Loading, useAction, useDialogs, useLoad } from '../ui/ui';
 
 const TZ = 'America/Sao_Paulo';
@@ -92,6 +93,10 @@ export default function Messenger({ channel, full }: { channel: Channel; full?: 
   }, [shown]);
   const people = (detail.data?.participants ?? []).filter((p) => !pq || (p.display_name ?? p.external_id).toLowerCase().includes(pq.toLowerCase()));
   const o = ov.data;
+  const cfgQ = useLoad(() => (channel === 'whatsapp' && isAdmin ? api().getSettings() : Promise.resolve(null)), [channel, isAdmin], 15000);
+  const waState = String((cfgQ.data?.int_status_evolution as { state?: string } | undefined)?.state ?? '');
+  const waOff = channel === 'whatsapp' && isAdmin && !!cfgQ.data && waState !== 'open';
+  const [connectWa, setConnectWa] = useState(false);
   const title = channel === 'whatsapp' ? 'WhatsApp' : 'Telegram';
 
   return (
@@ -103,6 +108,8 @@ export default function Messenger({ channel, full }: { channel: Channel; full?: 
           <Stat k="Na fila de envio" v={o ? int(o.outbox_pending) : '—'} />
           <a className="btn" href={`#/conversas?canal=${channel}${selId ? `&c=${selId}` : ''}`} target="_blank" rel="noreferrer"><ExternalLink size={16} />Tela cheia em nova aba</a></div></div>}
 
+      {waOff && !full && <div className="alert warning" role="status" style={{ marginBottom: 12, alignItems: 'center' }}><div style={{ flex: 1 }}><b>O WhatsApp não está conectado.</b> Conecte o número para receber as conversas e publicar nos grupos.</div><Button variant="primary" onClick={() => setConnectWa(true)}>Conectar WhatsApp</Button></div>}
+      {connectWa && <ConnectWhatsAppModal onClose={() => { setConnectWa(false); void cfgQ.reload(); }} onConnected={() => { void cfgQ.reload(); }} />}
       <section className={`card msgr${full ? ' full' : ''}${selId ? ' show-convo' : ''}${info ? '' : ' noinfo'}`}>
         {/* lista */}
         <div className="clist">

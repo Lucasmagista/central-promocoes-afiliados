@@ -6,6 +6,7 @@ import { int, minutesLabel, pct, ago, channelName } from '../lib/format';
 import { Badge, Card, ErrorBox, Loading, PageHead, useLoad } from '../ui/ui';
 import { ConnectorMode } from '../ui/badges';
 import { LineChart } from '../ui/charts';
+import { GoLive } from '../components/GoLive';
 
 const delta = (a: number, b: number) => (b === 0 ? null : Math.round(((a - b) / b) * 100));
 function Stat({ k, v, sub, icon, trend, to }: { k: string; v: string; sub?: string; icon: React.ReactNode; trend?: number | null; to?: string }) {
@@ -26,6 +27,7 @@ export default function Dashboard() {
   return (
     <>
       <PageHead title="Visão geral" sub="O que precisa de atenção agora e como a operação está indo." />
+      <GoLive />
       {d.alerts.length > 0 && <div className="col" style={{ marginBottom: 16, gap: 8 }}>{d.alerts.map((a) => <div key={a.code + a.message} className={`alert ${a.level}`} role={a.level === 'critical' ? 'alert' : undefined}>{icon[a.level]}<span>{a.message}</span></div>)}</div>}
       <div className="grid g4">
         <Stat k="Aguardando revisão" v={int(d.offers.needs_review)} icon={<ListChecks size={15} />} sub={d.oldest_review_minutes != null ? `mais antiga há ${minutesLabel(d.oldest_review_minutes)}` : 'fila vazia'} to="/revisao" />

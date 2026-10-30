@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlarmClock, Ban, CalendarClock, Download, HelpCircle, Pencil, RotateCcw, Search, Send, Zap } from 'lucide-react';
 import { api } from '../lib/api';
+import { ProductImage } from '../ui/ProductImage';
 import { useSession } from '../session';
 import { ago, dateTime, download, pubStatusLabel, channelName, toCsv } from '../lib/format';
 import type { Channel, Publication, PublicationStatus } from '../lib/types';
@@ -145,7 +146,7 @@ export default function Publications() {
             <Th t={tbl} k="offer">Oferta</Th><Th t={tbl} k="dest">Destino</Th><Th t={tbl} k="status">Status</Th><Th t={tbl} k="when">Quando</Th><Th t={tbl} k="clicks">Cliques</Th></tr></thead>
             <tbody>{tbl.rows.map((p) => <tr key={p.id} className="click" tabIndex={0} onClick={() => setSel(p)} onKeyDown={(e) => e.key === 'Enter' && setSel(p)}>
               {canOperate && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Selecionar ${p.offer_title}`} checked={checked.has(p.id)} onChange={() => checked.toggle(p.id)} /></td>}
-              <td style={{ maxWidth: 340 }}><div className="truncate" style={{ fontWeight: 600 }}>{p.offer_title}</div>{p.is_simulated && <span className="small muted">simulada</span>}</td>
+              <td style={{ maxWidth: 360 }}><div className="row" style={{ gap: 10 }}><ProductImage src={p.offer_image} size={40} /><div style={{ minWidth: 0 }}><div className="truncate" style={{ fontWeight: 600 }}>{p.offer_title}</div>{p.is_simulated && <span className="small muted">simulada</span>}</div></div></td>
               <td><div className="row" style={{ gap: 6 }}><ChannelTag c={p.channel} /><span className="small">{p.destination_name}</span></div></td>
               <td><PubStatus s={p.status} />{p.last_error_code && <div className="small muted mono">{p.last_error_code}</div>}{p.attempt_count > 1 && <div className="small muted">{p.attempt_count} tentativas</div>}</td>
               <td className="small nowrap">{p.sent_at ? <>{dateTime(p.sent_at)}<div className="muted">enviada {ago(p.sent_at)}</div></> : <>{dateTime(p.scheduled_for)}<div className="muted">{new Date(p.scheduled_for).getTime() > Date.now() ? 'agendada' : 'prevista'} {ago(p.scheduled_for)}</div></>}</td><td>{p.clicks}</td></tr>)}</tbody></table></div>

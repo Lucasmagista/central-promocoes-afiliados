@@ -18,6 +18,9 @@ import SettingsPage from './pages/Settings';
 import Users from './pages/Users';
 import Messenger from './pages/Messenger';
 import ConversasFull from './pages/ConversasFull';
+import Radar from './pages/Radar';
+import Automation from './pages/Automation';
+import Watchlist from './pages/Watchlist';
 
 function Gate() {
   const { state } = useSession();
@@ -42,6 +45,9 @@ function Gate() {
         <Route path="saude" element={<Health />} />
         <Route path="auditoria" element={<Audit />} />
         <Route path="usuarios" element={<Users />} />
+        <Route path="radar" element={<Radar />} />
+        <Route path="automacao" element={<Automation />} />
+        <Route path="acompanhar" element={<Watchlist />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

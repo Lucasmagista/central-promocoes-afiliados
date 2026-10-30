@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ListChecks, Tag, Send, Radio, Plug, FileText, BarChart3, ScrollText, HeartPulse, Settings, Users, Menu, Moon, Sun, LogOut, PauseCircle, PlayCircle, FlaskConical, MessageCircle, Search, PanelLeftClose, PanelLeftOpen, Tag as TagIcon, ChevronDown, ExternalLink, Plus } from 'lucide-react';
+import { LayoutDashboard, ListChecks, Tag, Send, Radio, Plug, FileText, BarChart3, ScrollText, HeartPulse, Settings, Users, Menu, Moon, Sun, LogOut, PauseCircle, PlayCircle, FlaskConical, MessageCircle, Search, Radar, Workflow, Eye, PanelLeftClose, PanelLeftOpen, Tag as TagIcon, ChevronDown, ExternalLink, Plus } from 'lucide-react';
 import { api } from './lib/api';
 import { useSession } from './session';
 import { Avatar, Button, Kbd, useAction, useDialogs, useLoad } from './ui/ui';
@@ -20,6 +20,11 @@ const NAV: { group: string; items: { to: string; label: string; icon: React.Reac
   { group: 'Conversas', items: [
     { to: '/whatsapp', label: 'WhatsApp', icon: <MessageCircle size={18} />, badge: 'wa', full: 'whatsapp' },
     { to: '/telegram', label: 'Telegram', icon: <Send size={18} style={{ transform: 'rotate(-20deg)' }} />, badge: 'tg', full: 'telegram' },
+  ] },
+  { group: 'Automação', items: [
+    { to: '/radar', label: 'Radar de grupos', icon: <Radar size={18} /> },
+    { to: '/automacao', label: 'Regras e automação', icon: <Workflow size={18} /> },
+    { to: '/acompanhar', label: 'Produtos acompanhados', icon: <Eye size={18} /> },
   ] },
   { group: 'Configuração', items: [
     { to: '/destinos', label: 'Destinos', icon: <Radio size={18} /> },

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CheckCircle2, XCircle, PartyPopper, Eye, Kanban as KanbanIcon, List, RotateCcw, Search } from 'lucide-react';
 import { api } from '../lib/api';
+import { ProductImage } from '../ui/ProductImage';
 import { useSession } from '../session';
 import { money, ago, pct, platformName } from '../lib/format';
 import { Badge, Button, Card, Empty, ErrorBox, Kbd, Loading, PageHead, PriceTag, useAction, useDialogs, useHotkeys, useLoad } from '../ui/ui';
@@ -89,7 +90,7 @@ function Board({ onChanged }: { onChanged: () => void }) {
           <div className="kbody">{items.length === 0 ? <div className="small muted kempty">Nada aqui.</div> : items.map((o) =>
             <article key={o.id} className="kcard" draggable={canOperate && (c.id === 'review' || c.id === 'rejected')} onDragStart={() => setDrag(o)} onDragEnd={() => { setDrag(null); setOver(null); }}
               data-dragging={drag?.id === o.id}>
-              <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}><Score v={o.score} /><button className="ktitle" onClick={() => setDetail(o.id)} title="Abrir detalhes">{o.title}</button></div>
+              <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}><Score v={o.score} /><ProductImage src={o.image_url} size={40} /><button className="ktitle" onClick={() => setDetail(o.id)} title="Abrir detalhes">{o.title}</button></div>
               <div className="row wrap small" style={{ gap: 8 }}><b>{money(o.current_price)}</b>{o.discount_pct != null && <span className="up">-{o.discount_pct}%</span>}<PlatformTag p={o.platform} /><span className="muted">{ago(o.price_observed_at)}</span></div>
               <CatSelect o={o} onChanged={() => void refresh()} disabled={!canOperate || !['needs_review', 'approved', 'scheduled', 'discovered'].includes(o.status)} />
               {c.id === 'rejected' && o.rejected_reason && <div className="small muted truncate" title={o.rejected_reason}>Motivo: {o.rejected_reason}</div>}
@@ -133,14 +134,14 @@ function ListView({ onChanged }: { onChanged: () => void }) {
         <section className="card list" aria-label="Ofertas aguardando revisão">
           {list.map((x) => (
             <div key={x.id} className="rrow" role="button" tabIndex={0} aria-current={x.id === o.id} onClick={() => setCur(x.id)} onKeyDown={(e) => e.key === 'Enter' && setCur(x.id)}>
-              <Score v={x.score} />
+              <Score v={x.score} /><ProductImage src={x.image_url} size={36} />
               <div style={{ minWidth: 0, flex: 1 }}><div className="t">{x.title}</div>
                 <div className="row small muted" style={{ gap: 8, marginTop: 3 }}><b style={{ color: 'var(--ink)' }}>{money(x.current_price)}</b>{x.discount_pct != null && <span className="up">-{x.discount_pct}%</span>}<span>{ago(x.price_observed_at)}</span></div></div>
             </div>))}
         </section>
         <section className="card"><div className="reviewcard">
           <div className="l col" style={{ gap: 14 }}>
-            <div className="row wrap"><Score v={o.score} /><div style={{ minWidth: 0, flex: 1 }}><h2 style={{ fontSize: 17 }}>{o.title}</h2>
+            <div className="row wrap"><Score v={o.score} /><ProductImage src={o.image_url} size={72} radius={12} /><div style={{ minWidth: 0, flex: 1 }}><h2 style={{ fontSize: 17 }}>{o.title}</h2>
               <div className="row wrap small muted" style={{ gap: 8 }}><PlatformTag p={o.platform} /><span>visto {ago(o.price_observed_at)}</span>{o.is_simulated && <Badge tone="info">Simulada</Badge>}</div></div></div>
             <CatSelect o={o} onChanged={() => void refresh()} disabled={!canOperate} />
             <div className="row wrap" style={{ gap: 14 }}><PriceTag value={money(o.current_price)} size="lg" />

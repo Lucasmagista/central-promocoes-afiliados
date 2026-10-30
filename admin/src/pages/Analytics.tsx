@@ -4,6 +4,7 @@ import { int, money, channelName, platformName } from '../lib/format';
 import { Badge, Card, ErrorBox, Loading, PageHead, Seg, useLoad } from '../ui/ui';
 import { Funnel, HBars, LineChart } from '../ui/charts';
 import { PlatformTag } from '../ui/badges';
+import { CommissionsCard } from '../components/CommissionsCard';
 
 export default function Analytics() {
   const [days, setDays] = useState<7 | 14 | 30 | 90>(14);
@@ -13,7 +14,7 @@ export default function Analytics() {
   const totalSent = a?.series.reduce((x, y) => x + y.sent, 0) ?? 0;
   return (
     <>
-      <PageHead title="Analytics" sub="Cliques vêm do redirecionador próprio. Comissão e vendas ficam nos painéis oficiais dos programas.">
+      <PageHead title="Analytics" sub="Cliques vêm do redirecionador próprio. A comissão da Shopee é sincronizada sozinha; nas outras lojas ela fica nos painéis oficiais.">
         <Seg value={String(days) as '7' | '14' | '30' | '90'} onChange={(v) => setDays(+v as 7 | 14 | 30 | 90)} options={[{ v: '7', label: '7 d' }, { v: '14', label: '14 d' }, { v: '30', label: '30 d' }, { v: '90', label: '90 d' }]} /></PageHead>
       {q.loading && !a ? <Loading /> : q.error || !a ? <ErrorBox error={q.error ?? 'Sem dados'} retry={q.reloadLoud} /> : <>
         <div className="grid g4" style={{ marginBottom: 14 }}>
@@ -21,6 +22,7 @@ export default function Analytics() {
         <div className="grid g2">
           <Card title={`Envios por dia — ${days} dias`} actions={<Badge tone="ok">{int(totalSent)} no período</Badge>}><LineChart height={190} days={a.series.map((s) => s.day)} series={[{ name: 'Envios', color: 'var(--ok)', values: a.series.map((s) => s.sent) }]} /></Card>
           <Card title={`Cliques por dia — ${days} dias`} actions={<Badge tone="info">{int(totalClicks)} no período</Badge>}><LineChart height={190} days={a.series.map((s) => s.day)} series={[{ name: 'Cliques', color: 'var(--accent)', values: a.series.map((s) => s.clicks) }]} /></Card></div>
+        <div style={{ marginTop: 14 }}><CommissionsCard days={days} /></div>
         <div className="grid g3" style={{ marginTop: 14 }}>
           <Card title="Funil"><Funnel steps={[{ label: 'Ofertas recebidas', value: a.funnel.ingested }, { label: 'Aprovadas', value: a.funnel.approved }, { label: 'Publicadas', value: a.funnel.published }, { label: 'Com clique', value: a.funnel.clicked }]} /></Card>
           <Card title="Cliques por canal"><HBars rows={a.by_channel.map((c) => ({ label: channelName[c.channel] ?? c.channel, value: c.clicks }))} /></Card>

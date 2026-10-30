@@ -1,4 +1,5 @@
 import type {
+  PromoSource, PromoSourceInput, CapturedLink, RoutingRule, RoutingRuleInput, WatchItem, CommissionSummary,
   Alert, Analytics, AuditEvent, AuditFilter, Connector, DashboardSummary, Destination, IngestInput, IngestResult,
   Offer, OfferDetail, OfferFilter, Profile, Publication, PublicationFilter, Role, Run, SettingsMap, Template,
   Channel, ChannelOverview, SecretInfo, SecretKey, IntProvider, Chat, ChatDetail, ChatFilter, ChatMessage, ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion, GroupAction, GroupDefaults, DatabaseConfig, DatabaseOverview } from './types';
@@ -69,6 +70,18 @@ export interface Api {
   listConnectors(): Promise<Connector[]>;
   saveConnector(id: string, patch: Partial<Connector>): Promise<void>;
   listRuns(): Promise<Run[]>;
+
+  listPromoSources(): Promise<PromoSource[]>;
+  savePromoSource(chatId: string, cfg: PromoSourceInput): Promise<string>;
+  deletePromoSource(chatId: string): Promise<void>;
+  listCapturedLinks(limit?: number): Promise<CapturedLink[]>;
+  listRoutingRules(): Promise<RoutingRule[]>;
+  saveRoutingRule(id: string | null, cfg: RoutingRuleInput): Promise<string>;
+  deleteRoutingRule(id: string): Promise<void>;
+  listWatchItems(): Promise<WatchItem[]>;
+  saveWatchItem(url: string, target: number | null, drop: number | null): Promise<string>;
+  deleteWatchItem(id: string): Promise<void>;
+  commissionSummary(days?: number): Promise<CommissionSummary>;
 
   listTemplates(): Promise<Template[]>;
   saveTemplate(id: string, patch: { body?: string; active?: boolean; name?: string }): Promise<void>;

@@ -65,7 +65,7 @@ export default function WorkerTab({ s, isAdmin }: TabProps) {
       <Card title="Do zero ao funcionando">
         <ol className="guide">
           <Step n={1} title="Variáveis no servidor" done={alive}>Crie <code>deploy/worker/worker.env</code> com as duas variáveis da seção “Variáveis de ambiente” (a <i>service_role</i> fica só aí).</Step>
-          <Step n={2} title="Migrações do banco até a 015" done={!!last.at}>No SQL Editor do Supabase, rode em ordem as migrações que ainda não rodou.</Step>
+          <Step n={2} title="Migrações do banco até a 017" done={!!last.at}>No SQL Editor do Supabase, rode em ordem as migrações que ainda não rodou.</Step>
           <Step n={3} title="Subir o worker" done={alive}>No servidor: <code>./deploy/servidor/atualizar.sh --force</code> (ou o script <code>subir.ps1</code>, no seu computador). O sinal de vida acima fica verde em até 1 minuto.</Step>
           <Step n={4} title="Rodar o autoteste" done={!!last.ok}>Use o primeiro teste logo abaixo.</Step>
           <Step n={5} title="Webhooks de entrada" done={!!evoCfg.webhook_url}>Os endereços aparecem em <code>docker logs promo-worker</code>. Cole nas abas WhatsApp (pode ser o interno <code>http://promo-worker:8787/hook/whatsapp-…</code>) e Telegram (precisa ser https público). Depois rode “Webhooks de entrada”.</Step>

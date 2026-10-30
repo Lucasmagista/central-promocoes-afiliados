@@ -234,9 +234,9 @@ async function shopeeCall(ctx, cfg, secret, query, variables) {
 }
 const SP_FULL = 'itemId shopId productName price priceMin priceMax priceDiscountRate commissionRate sales ratingStar imageUrl shopName productLink offerLink';
 const SP_MIN = 'itemId productName price commissionRate imageUrl productLink offerLink';
-async function shopeeProducts(ctx, cfg, secret, keyword, limit, sortType = 2) {
+async function shopeeProducts(ctx, cfg, secret, keyword, limit, sortType = 2, page = 1) {
   // sortType: 1 relevância · 2 mais vendidos · 3 maior preço · 4 menor preço · 5 maior comissão
-  const q = (f) => `query{ productOfferV2(keyword:${JSON.stringify(String(keyword))}, sortType:${sortType}, page:1, limit:${limit}){ nodes{ ${f} } } }`;
+  const q = (f) => `query{ productOfferV2(keyword:${JSON.stringify(String(keyword))}, sortType:${sortType}, page:${page}, limit:${limit}){ nodes{ ${f} } } }`;
   let d; try { d = await shopeeCall(ctx, cfg, secret, q(SP_FULL)); } catch (e) { if (!/field|cannot query|validation/i.test(String(e.message))) throw e; d = await shopeeCall(ctx, cfg, secret, q(SP_MIN)); }
   return (d && d.productOfferV2 && d.productOfferV2.nodes) || [];
 }
@@ -287,7 +287,7 @@ export function mlItem(it) {
     image: it.thumbnail ? String(it.thumbnail).replace(/^http:/, 'https:').replace(/-I\.(jpg|webp)$/, '-O.$1') : null, seller: it.seller && it.seller.nickname || null,
     stock: it.available_quantity == null ? null : Number(it.available_quantity), used: !!it.condition && it.condition !== 'new', sold: Number(it.sold_quantity) || null, free_shipping: !!(it.shipping && it.shipping.free_shipping) };
 }
-async function mlSearch(ctx, rt, q, limit) { const d = await mlGet(ctx, rt, `/sites/MLB/search?q=${encodeURIComponent(q)}&limit=${limit}`); return ((d && d.results) || []).map(mlItem); }
+async function mlSearch(ctx, rt, q, limit, offset = 0) { const d = await mlGet(ctx, rt, `/sites/MLB/search?q=${encodeURIComponent(q)}&limit=${limit}${offset > 0 ? `&offset=${offset}` : ''}`); return ((d && d.results) || []).map(mlItem); }
 async function mlAccount(ctx, rt) {
   const d = (await mlGet(ctx, rt, '/users/me')) || {}; const rep = d.seller_reputation || {};
   return { id: String(d.id || ''), nickname: d.nickname || null, site: d.site_id || null, permalink: d.permalink || null, level: rep.level_id || null, power_seller: rep.power_seller_status || null, registered: d.registration_date || null };
@@ -324,9 +324,9 @@ async function aliCall(ctx, cfg, secret, method, params) {
   }
   return d;
 }
-async function aliProducts(ctx, cfg, secret, keyword, size) {
-  const d = await aliCall(ctx, cfg, secret, 'aliexpress.affiliate.product.query', { keywords: keyword, page_no: '1', page_size: String(size), sort: 'LAST_VOLUME_DESC', target_currency: 'BRL', target_language: 'PT', ship_to_country: 'BR', tracking_id: String(cfg.tracking_id || cfg.affiliate_id || ''), fields: 'commission_rate,sale_price' });
-  const res = d.aliexpress_affiliate_product_query_response && d.aliexpress_affiliate_product_query_response.resp_result;
+async function aliProducts(ctx, cfg, secret, keyword, size, page = 1, hot = false) {
+  const d = await aliCall(ctx, cfg, secret, hot ? 'aliexpress.affiliate.hotproduct.query' : 'aliexpress.affiliate.product.query', { keywords: keyword, page_no: String(page), page_size: String(size), sort: 'LAST_VOLUME_DESC', target_currency: 'BRL', target_language: 'PT', ship_to_country: 'BR', tracking_id: String(cfg.tracking_id || cfg.affiliate_id || ''), fields: 'commission_rate,sale_price' });
+  const res = (d[hot ? 'aliexpress_affiliate_hotproduct_query_response' : 'aliexpress_affiliate_product_query_response'] || {}).resp_result;
   if (!res) throw new Error('Resposta inesperada da AliExpress (sem resp_result). Confira se o app tem a API de afiliados liberada.');
   if (Number(res.resp_code) !== 200) throw new Error(`AliExpress: ${clean(res.resp_msg || 'recusado')} (código ${res.resp_code})`);
   const list = res.result && res.result.products && res.result.products.product; return Array.isArray(list) ? list : [];
@@ -366,11 +366,12 @@ export function amazonItem(it, mkt) {
     image: img && img.url || null, seller: l.merchantInfo && l.merchantInfo.name || null, stock: /out|unavail/i.test(av) ? 0 : null, commission_pct: null, sold: null };
 }
 const FETCH = {
-  mercadolivre: (ctx, rt, cfg, q) => mlSearch(ctx, rt, q, 50),
-  shopee: async (ctx, rt, cfg, q) => (await shopeeProducts(ctx, cfg, rt.secrets.shopee_secret, q, 30)).map(shopeeItem),
-  aliexpress: async (ctx, rt, cfg, q) => (await aliProducts(ctx, cfg, rt.secrets.aliexpress_app_secret, q, 30)).map(aliItem),
+  mercadolivre: async (ctx, rt, cfg, q) => { const out = []; for (let p = 0; p < pagesOf(cfg); p++) out.push(...await mlSearch(ctx, rt, q, 50, p * 50)); return out; },
+  shopee: async (ctx, rt, cfg, q) => { const out = []; for (let p = 1; p <= pagesOf(cfg); p++) out.push(...(await shopeeProducts(ctx, cfg, rt.secrets.shopee_secret, q, 30, cfg.sort_by === 'commission' ? 5 : 2, p)).map(shopeeItem)); return out; },
+  aliexpress: async (ctx, rt, cfg, q) => { const out = []; for (let p = 1; p <= pagesOf(cfg); p++) out.push(...(await aliProducts(ctx, cfg, rt.secrets.aliexpress_app_secret, q, 30, p, cfg.hot_products === true)).map(aliItem)); return out; },
   amazon: async (ctx, rt, cfg, q) => (await amazonSearch(ctx, rt, cfg, q, 10)).map((i) => amazonItem(i, cfg.marketplace || 'www.amazon.com.br')),
 };
+const pagesOf = (cfg) => Math.max(1, Math.min(3, Number(cfg.pages) || 1));
 const credsOk = (p, cfg, sec) => p === 'shopee' ? cfg.app_id && sec.shopee_secret : p === 'mercadolivre' ? cfg.app_id && sec.ml_client_secret
   : p === 'aliexpress' ? cfg.app_id && sec.aliexpress_app_secret && (cfg.tracking_id || cfg.affiliate_id) : cfg.client_id && cfg.partner_tag && sec.amazon_client_secret;
 
@@ -421,7 +422,7 @@ async function checkStore(ctx, provider, rt) {
 
 /* ---- Coleta: busca produtos reais pela API, filtra pelas regras do conector e entrega ao banco (ingest_offer) ---- */
 async function gather(ctx, rt, provider, cfg, maxTerms) {
-  const terms = termsFor(cfg).slice(0, maxTerms); const items = []; const errors = [];
+  const terms = (await termsForRt(ctx, rt, provider, cfg)).slice(0, maxTerms); const items = []; const errors = [];
   for (const t of terms) {
     try {
       const got = await FETCH[provider](ctx, rt, cfg, t.q);
@@ -442,7 +443,8 @@ export function selectOffers(items, cfg, limit) {
     if (it.price < minP || it.price > maxP) { skip.fora_da_faixa++; continue; }
     list.push(it);
   }
-  list.sort((a, b) => pctOff(b.price, b.previous) - pctOff(a.price, a.previous) || (b.sold || 0) - (a.sold || 0));
+  const by = cfg.sort_by;
+  list.sort((a, b) => by === 'commission' ? (b.commission_pct || 0) - (a.commission_pct || 0) || pctOff(b.price, b.previous) - pctOff(a.price, a.previous) : by === 'sold' ? (b.sold || 0) - (a.sold || 0) : pctOff(b.price, b.previous) - pctOff(a.price, a.previous) || (b.sold || 0) - (a.sold || 0));
   return { list: list.slice(0, limit), skip, eligible: list.length };
 }
 const affiliateUrl = (it, cfg) => {
@@ -463,9 +465,7 @@ export async function collectStore(ctx, rt, provider, { dry = false, limit, maxT
     if (dry) return { ok: true, dry: true, seen: g.items.length, eligible: sel.eligible, skipped: sel.skip, errors: g.errors, items: sel.list.slice(0, 12).map(previewItem) };
     let created = 0, duplicates = 0, rejected = 0, lowScore = 0; const reasons = {};
     for (const it of sel.list) {
-      const res = (await ctx.rpc('ingest_offer', { p: { platform: provider, external_id: it.external_id, original_url: it.url, affiliate_url: affiliateUrl(it, cfg), title: it.title.slice(0, 300), price: it.price, previous_price: it.previous || undefined,
-        image_url: it.image || undefined, seller_name: it.seller || undefined, category: it.category, source_kind: 'api', source_layer: 'A', source_name: SOURCE_NAME[provider],
-        availability: it.stock != null ? 'in_stock' : 'unknown', observed_at: ctx.now().toISOString(), evidence: { termo: it.term, comissao_pct: it.commission_pct ?? undefined, vendidos: it.sold ?? undefined, preco_anterior_derivado: it.derived_previous || undefined } } })) || {};
+      const res = await ingestStoreItem(ctx, rt, provider, cfg, it);
       if (res.status === 'created') {
         if (cfg.min_score != null && res.score != null && res.score < Number(cfg.min_score)) { await ctx.rpc('reject_offer', { p_offer: res.offer_id, p_reason: `Abaixo do score mínimo do conector (${res.score} < ${cfg.min_score})` }).catch(() => {}); lowScore++; } else created++;
       } else if (res.status === 'duplicate') duplicates++;
@@ -504,7 +504,13 @@ async function evolutionStatus(ctx, rt) {
     if (st.state !== 'missing') { const one = await ev.fetchOne().catch(() => null); if (one) { st.phone = one.phone || null; st.profile = one.profile || null; } }
     const w = st.state === 'missing' ? null : await ev.getWebhook().catch(() => null);
     st.webhook = w ? { enabled: w.enabled, url: w.url, matches: !cfg.webhook_url || w.url === cfg.webhook_url } : null;
+    // conexão gerenciada pelo servidor: o endereço do webhook é do próprio worker, então corrige sozinho se estiver diferente
+    if (st.state !== 'missing' && rt.managed && rt.managed.evolution.webhook && cfg.webhook_url && (!w || !w.enabled || w.url !== cfg.webhook_url)) {
+      try { await ev.setWebhook(cfg.webhook_url); const w2 = await ev.getWebhook().catch(() => null); if (w2) st.webhook = { enabled: w2.enabled, url: w2.url, matches: w2.url === cfg.webhook_url }; st.webhook_fixed = true; }
+      catch (e) { st.webhook_error = clean(e && e.message); }
+    }
   }
+  st.managed = (rt.managed && rt.managed.evolution) || {}; st.host = hostOf(cfg.base_url) || null;
   return st;
 }
 
@@ -591,6 +597,7 @@ async function applyDatabaseMigrations(ctx, rt) {
 async function integrationTask(ctx, rt, payload) {
   const { provider, action } = payload;
   if (provider === 'worker') {
+    if (action === 'radar_test') { need(/^https?:\/\//i.test(String(payload.url || '')), 'Informe o endereço do produto.'); return radarTest(ctx, rt, String(payload.url)); }
     if (action === 'selftest') return selfTest(ctx, rt);
     if (action === 'webhook_check') return webhookCheck(ctx, rt);
     if (action === 'run_monitor') return { monitor: await runMonitor(ctx) };
@@ -608,6 +615,13 @@ async function integrationTask(ctx, rt, payload) {
       if (cur !== 'missing') return { existed: true, state: cur };
       const c = await ev.create(); return { created: true, ...c };
     }
+    if (action === 'connect_poll') {
+      // consulta repetida pelo painel: devolve o estado e, enquanto não conectou, o QR code atual (ou o código de pareamento)
+      const cur = await ev.state().catch(() => 'missing');
+      if (cur === 'open') { const st = await evolutionStatus(ctx, rt); await ctx.rpc('report_integration_status', { p_provider: 'evolution', p_status: st }); return { state: 'open', phone: st.phone || null, profile: st.profile || null, webhook: st.webhook || null }; }
+      if (cur === 'missing') { const c = await ev.create(); return { created: true, state: 'connecting', ...c }; }
+      const c = await ev.connect(payload.pairing_number); return { state: 'connecting', ...c };
+    }
     if (action === 'connect') {
       const cur = await ev.state(); if (cur === 'open') return { state: 'open', already: true };
       if (cur === 'missing') { const c = await ev.create(); return { created: true, state: 'connecting', ...c }; }
@@ -619,9 +633,21 @@ async function integrationTask(ctx, rt, payload) {
     if (action === 'send_test') { const r = await ev.send('sendText', { number: payload.to, text: payload.text }); if (!r.ok) throw new Error(r.error); return { sent: true, message_id: r.messageId }; }
   }
   if (provider === 'telegram') {
-    const tg = rt.secrets.telegram_bot_token; need(tg, 'Informe o token do bot (aba Telegram).');
+    const tg = rt.secrets.telegram_bot_token; need(tg, 'O token do bot não está configurado: coloque TELEGRAM_BOT_TOKEN no arquivo do servidor (deploy/worker/worker.env) ou informe em Avançado.');
     const bot = telegramClient(ctx, tg);
-    if (action === 'check') { const st = await telegramStatus(ctx, rt); await ctx.rpc('report_integration_status', { p_provider: 'telegram', p_status: { ...(rt.status.telegram || {}), ...st } }); return st; }
+    if (action === 'connect') {
+      // liga tudo sozinho: confere o bot, registra o webhook público (se houver) e deixa o Telegram ativo
+      const me = await bot.me(); const url = rt.managed && rt.managed.telegram.webhook ? rt.telegram.webhook_url : '';
+      const out = { enabled: true, mode: url ? 'webhook' : 'polling' };
+      if (url) { need(rt.secrets.telegram_webhook_secret, 'Segredo do webhook indisponível.'); await bot.setWebhook(url, rt.secrets.telegram_webhook_secret); out.webhook_url = url; }
+      else await bot.deleteWebhook();
+      await ctx.rpc('save_integration', { p_provider: 'telegram', p_config: out });
+      rt.telegram = { ...rt.telegram, ...out };
+      const st = await telegramStatus(ctx, rt); st.managed = (rt.managed && rt.managed.telegram) || {};
+      await ctx.rpc('report_integration_status', { p_provider: 'telegram', p_status: { ...(rt.status.telegram || {}), ...st } });
+      return { ...st, connected: true, bot_username: me.username };
+    }
+    if (action === 'check') { const st = await telegramStatus(ctx, rt); st.managed = (rt.managed && rt.managed.telegram) || {}; await ctx.rpc('report_integration_status', { p_provider: 'telegram', p_status: { ...(rt.status.telegram || {}), ...st } }); return st; }
     if (action === 'set_webhook') {
       need(rt.telegram.webhook_url, 'Informe o endereço do webhook (aba Telegram).'); need(rt.secrets.telegram_webhook_secret, 'Gere o segredo do webhook antes.');
       await bot.setWebhook(rt.telegram.webhook_url, rt.secrets.telegram_webhook_secret); const info = await bot.webhookInfo(); return { webhook: sanitizeWebhook(info) };
@@ -790,7 +816,8 @@ export async function runJobs(ctx, { max = 5 } = {}) {
 /* ------------------------------------------------------------------ Envios */
 async function loadRuntime(ctx) {
   const rt = await ctx.rpc('get_integration_runtime', {}); rt.secrets = rt.secrets || {}; rt.status = rt.status || {}; rt.connectors = rt.connectors || {};
-  rt.evolution = rt.evolution || {}; rt.telegram = rt.telegram || {}; rt.groups = rt.groups || {};
+  rt.evolution = rt.evolution || {}; rt.telegram = rt.telegram || {}; rt.groups = rt.groups || {}; rt.tuning = rt.tuning || {}; rt.search_terms = rt.search_terms || {};
+  applyManaged(ctx, rt);
   return rt;
 }
 const pickDelay = (ctx, ev) => { const a = Number(ev.send_delay_min_s || 4), b = Math.max(a, Number(ev.send_delay_max_s || 12)); return Math.round((a + ctx.rand() * (b - a)) * 1000); };
@@ -816,7 +843,7 @@ function sender(ctx, rt) {
 }
 
 export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) {
-  const t0 = ctx.now().getTime(); const rt = await loadRuntime(ctx); const s = sender(ctx, rt); let sent = 0; let failed = 0; let unknown = 0;
+  const t0 = ctx.now().getTime(); const rt = await loadRuntime(ctx); const s = sender(ctx, rt); let sent = 0; let failed = 0; let unknown = 0; let repriced = 0;
   await ctx.rpc('heartbeat', { p_service: 'worker', p_status: 'ok', p_details: {} }).catch(() => {});
   const left = () => budgetMs - (ctx.now().getTime() - t0);
   // 1) testes de destino
@@ -830,10 +857,17 @@ export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) 
   for (let i = 0; i < maxPerRun && left() > 8000; i++) {
     const p = await ctx.rpc('claim_next_publication', { p_worker: 'worker' }); if (!p) break;
     if (p.is_simulated) { await ctx.rpc('complete_publication', { p_id: p.publication_id, p_external_message_id: 'simulado-' + String(p.publication_id).slice(0, 8) }); sent++; continue; }
+    {
+      const pc = await ctx.rpc('get_publication_context', { p_pub: p.publication_id }).catch(() => null);
+      if (pc && pc.offer_id) {
+        if ((rt.tuning || {}).revalidate_before_send !== false) { const v = await revalidate(ctx, rt, pc).catch(() => null); if (v && v.reprice) { repriced++; continue; } }
+        if (pc.short_code && pc.sub_id) await personalizeLink(ctx, rt, pc).catch(() => {});
+      }
+    }
     const r = await s.send(p.channel, p.external_chat_id, p.rendered_text, p.image_url);
     if (r.ok) { await ctx.rpc('complete_publication', { p_id: p.publication_id, p_external_message_id: r.messageId }); sent++; }
     else if (r.ambiguous) { await ctx.rpc('mark_publication_unknown', { p_id: p.publication_id, p_note: `${r.error} — confira no canal antes de reenviar` }); unknown++; }
-    else { await ctx.rpc('fail_publication', { p_id: p.publication_id, p_error_code: r.code, p_permanent: !!r.permanent, p_retry_in_seconds: r.retryIn ?? null }); failed++; }
+    else { await ctx.rpc('fail_publication', { p_id: p.publication_id, p_error_code: r.code, p_permanent: !!r.permanent, p_retry_in_seconds: r.retryIn ?? null }); failed++; if (r.code === 'rate') break; }
     if (p.channel === 'whatsapp') await ctx.sleep(Math.min(pickDelay(ctx, rt.evolution), Math.max(0, left() - 4000)));
   }
   // 3) respostas manuais das conversas
@@ -844,7 +878,7 @@ export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) 
     else await ctx.rpc('fail_chat_outbox', { p_id: m.outbox_id, p_error: r.ambiguous ? `${r.error} — resultado incerto: confira no aplicativo antes de reenviar` : r.error });
   }
   await ctx.rpc('release_stale_claims', {}).catch(() => {});
-  return { sent, failed, unknown };
+  return { sent, failed, unknown, repriced };
 }
 
 /* ------------------------------------------------------------------ Monitor + Telegram por consulta */
@@ -907,7 +941,7 @@ export function mapTelegramUpdate(u) {
   const from = m.from || m.sender_chat || {};
   return { chat: { channel: 'telegram', external_id: String(c.id), kind: c.type === 'channel' ? 'channel' : c.type === 'private' ? 'private' : 'group', title: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') || undefined, username: c.username || undefined },
     direction: 'in', external_id: `${c.id}:${m.message_id}`, sender_external_id: from.id != null ? String(from.id) : undefined, sender_name: from.title || [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username,
-    body: text || `[${kind}]`, kind, sent_at: m.date ? new Date(m.date * 1000).toISOString() : undefined };
+    body: tgBody(m, text) || `[${kind}]`, kind, sent_at: m.date ? new Date(m.date * 1000).toISOString() : undefined };
 }
 // Webhook do Telegram: confere o segredo do cabeçalho X-Telegram-Bot-Api-Secret-Token antes de aceitar.
 /* ------------------------------------------------------------------ Segurança dos webhooks de entrada */
@@ -946,4 +980,307 @@ export async function handleEvolutionWebhook(ctx, body) {
   if (!/messages[._]upsert/i.test(String(body && body.event))) return { ok: true, status: 200, ignored: true };
   let n = 0; for (const m of mapEvolutionMessage(body).slice(0, 50)) { await ctx.rpc('ingest_chat_message', { p: m }); n++; }
   return { ok: true, status: 200, stored: n };
+}
+
+
+/* ================================================================== Dados atuais de um produto (revalidação, Radar e acompanhamento) */
+const normMl = (d) => ({ external_id: String(d.id || ''), title: String(d.title || '').trim(), price: Number(d.price) || 0, previous: d.original_price != null && Number(d.original_price) > Number(d.price) ? Number(d.original_price) : null,
+  url: d.permalink || '', affiliate_url: '', image: (d.pictures && d.pictures[0] && (d.pictures[0].secure_url || d.pictures[0].url)) || (d.thumbnail ? String(d.thumbnail).replace(/^http:/, 'https:') : null), seller: null,
+  stock: d.status && d.status !== 'active' ? 0 : (d.available_quantity == null ? null : Number(d.available_quantity)), used: !!d.condition && d.condition !== 'new', sold: Number(d.sold_quantity) || null, commission_pct: null });
+
+// Devolve { found, item } | { found:false } | { supported:false, reason }. Erros de rede/autenticação são lançados.
+export async function fetchCurrent(ctx, rt, platform, externalId) {
+  const cfg = connectorOf(rt, platform).config || {}; const sec = rt.secrets || {};
+  if (platform === 'magalu') return { supported: false, reason: 'A Magalu não tem API de afiliados: cadastre a oferta manualmente' };
+  if (!credsOk(platform, cfg, sec)) return { supported: false, reason: `Credenciais do ${STORE_LABEL[platform] || platform} não configuradas` };
+  if (platform === 'mercadolivre') {
+    if (!(sec.ml_refresh_token || sec.ml_access_token)) return { supported: false, reason: 'Conta do Mercado Livre não conectada' };
+    if (!/^MLB\d+$/.test(String(externalId))) return { supported: false, reason: 'Identificador do Mercado Livre inválido' };
+    try { const d = await mlGet(ctx, rt, `/items/${externalId}`); return d && d.id ? { found: true, item: normMl(d) } : { found: false }; } catch (e) { if (e && e.status === 404) return { found: false }; throw e; }
+  }
+  if (platform === 'shopee') {
+    const itemId = String(externalId).split('.').pop(); if (!/^\d+$/.test(itemId)) return { supported: false, reason: 'Identificador da Shopee inválido' };
+    const q = (f) => `query{ productOfferV2(itemId:${itemId}, limit:1){ nodes{ ${f} } } }`; let d;
+    try { d = await shopeeCall(ctx, cfg, sec.shopee_secret, q(SP_FULL)); } catch (e) { if (!/field|cannot query|validation/i.test(String(e.message))) throw e; d = await shopeeCall(ctx, cfg, sec.shopee_secret, q(SP_MIN)); }
+    const n = d && d.productOfferV2 && d.productOfferV2.nodes && d.productOfferV2.nodes[0];
+    return n ? { found: true, item: shopeeItem(n) } : { found: false };
+  }
+  if (platform === 'amazon') {
+    const token = await amazonToken(ctx, rt, cfg); const mkt = cfg.marketplace || 'www.amazon.com.br';
+    if (rt._amzCalls) await ctx.sleep(1100); rt._amzCalls = (rt._amzCalls || 0) + 1;
+    const r = await ctx.http({ method: 'POST', url: ((ctx.urls && ctx.urls.amazon) || 'https://creatorsapi.amazon') + '/catalog/v1/getItems', headers: { Authorization: `Bearer ${token}`, 'x-marketplace': mkt },
+      json: { itemIds: [String(externalId)], itemIdType: 'ASIN', marketplace: mkt, partnerTag: cfg.partner_tag, resources: AMZ_RES }, timeoutMs: 25000 });
+    if (r.status === 404) return { found: false };
+    if (r.status >= 400) { const er = r.data && Array.isArray(r.data.errors) && r.data.errors[0]; const e = new Error(`a Amazon respondeu ${r.status}: ${er ? clean(er.message || er.code) : msgOf(r.data) || 'sem detalhe'}`); e.status = r.status; throw e; }
+    const it = ((r.data && r.data.itemsResult && r.data.itemsResult.items) || (r.data && r.data.items) || [])[0]; if (!it) return { found: false };
+    const item = amazonItem(it, mkt); return item.price > 0 ? { found: true, item } : { found: false };
+  }
+  if (platform === 'aliexpress') {
+    const d = await aliCall(ctx, cfg, sec.aliexpress_app_secret, 'aliexpress.affiliate.productdetail.get', { product_ids: String(externalId), target_currency: 'BRL', target_language: 'PT', country: 'BR', tracking_id: String(cfg.tracking_id || cfg.affiliate_id || '') });
+    const res = d.aliexpress_affiliate_productdetail_get_response && d.aliexpress_affiliate_productdetail_get_response.resp_result;
+    const list = res && res.result && res.result.products && res.result.products.product; const n = Array.isArray(list) ? list[0] : list;
+    return n && n.product_id ? { found: true, item: aliItem(n) } : { found: false };
+  }
+  return { supported: false, reason: 'Plataforma sem consulta por API' };
+}
+
+/* ================================================================== Ingestão compartilhada (coleta, Radar e acompanhamento) */
+async function guessCategory(ctx, title) {
+  const s = await ctx.rpc('category_guess', { p_text: String(title || '').slice(0, 300) }).catch(() => null);
+  return typeof s === 'string' && s ? s : undefined;
+}
+async function ingestStoreItem(ctx, rt, provider, cfg, it, { layer = 'A', sourceName, evidence = {}, autoOk = false } = {}) {
+  const category = it.category || await guessCategory(ctx, it.title);
+  const res = (await ctx.rpc('ingest_offer', { p: { platform: provider, external_id: it.external_id, original_url: it.url, affiliate_url: affiliateUrl(it, cfg), title: it.title.slice(0, 300), price: it.price, previous_price: it.previous || undefined,
+    image_url: it.image || undefined, seller_name: it.seller || undefined, category, source_kind: 'api', source_layer: layer, source_name: sourceName || SOURCE_NAME[provider],
+    availability: it.stock != null ? (it.stock > 0 ? 'in_stock' : 'out_of_stock') : 'unknown', observed_at: ctx.now().toISOString(),
+    evidence: { termo: it.term, comissao_pct: it.commission_pct ?? undefined, vendidos: it.sold ?? undefined, preco_anterior_derivado: it.derived_previous || undefined, ...evidence } } })) || {};
+  if (res.status === 'created') {
+    const sc = await ctx.rpc('set_offer_signals', { p_offer: res.offer_id, p_commission: it.commission_pct ?? null, p_sold: it.sold ?? null, p_rating: it.rating ?? null, p_auto_ok: !!autoOk }).catch(() => null);
+    void sc;
+  }
+  return res;
+}
+
+/* ================================================================== Revalidação do preço antes do envio e link por destino */
+async function revalidate(ctx, rt, pc) {
+  if (pc.revalidated_at && ctx.now().getTime() - new Date(pc.revalidated_at).getTime() < 20 * 60000) return null;
+  const cur = await fetchCurrent(ctx, rt, pc.platform, pc.external_id);
+  if (!cur || !cur.found || !cur.item) return null;
+  const price = cur.item.price; const old = Number(pc.current_price); const avail = cur.item.stock == null ? true : cur.item.stock > 0;
+  const maxDrift = Number((rt.tuning || {}).max_price_drift_pct ?? 3);
+  const drift = old > 0 ? Math.abs(price - old) / old * 100 : 0;
+  if (!avail || drift > maxDrift) {
+    await ctx.rpc('reprice_offer', { p_offer: pc.offer_id, p_price: price > 0 ? price : null, p_available: avail, p_note: avail ? `Preço mudou de ${old} para ${price} antes do envio` : 'Produto sem estoque na revalidação antes do envio' });
+    return { reprice: true };
+  }
+  await ctx.rpc('mark_offer_revalidated', { p_offer: pc.offer_id }).catch(() => {});
+  return null;
+}
+// Um rastreio por destino: só quando há link curto (o texto leva o código; aqui troca o destino final). Nunca bloqueia o envio.
+async function personalizeLink(ctx, rt, pc) {
+  if (!pc.affiliate_url || !pc.short_code || !pc.sub_id) return false;
+  let url = null;
+  if (pc.platform === 'amazon') url = pc.affiliate_url + (pc.affiliate_url.includes('?') ? '&' : '?') + 'ascsubtag=' + encodeURIComponent(pc.sub_id);
+  else if (pc.platform === 'shopee') {
+    const cfg = connectorOf(rt, 'shopee').config || {}; if (!credsOk('shopee', cfg, rt.secrets)) return false;
+    const d = await shopeeCall(ctx, cfg, rt.secrets.shopee_secret, `mutation{ generateShortLink(input:{ originUrl:${JSON.stringify(String(pc.original_url))}, subIds:[${JSON.stringify(String(pc.sub_id))}] }){ shortLink } }`);
+    url = d && d.generateShortLink && d.generateShortLink.shortLink;
+  }
+  if (!url) return false;
+  await ctx.rpc('set_short_link_target', { p_pub: pc.publication_id, p_url: url }); return true;
+}
+
+/* ================================================================== Radar de grupos */
+const FOLLOW_HOST = /(^|\.)(shopee\.com\.br|shopee\.com|shp\.ee|shope\.ee|mercadolivre\.com\.br|mercadolibre\.com|mercadolivre\.com|meli\.la|amazon\.com\.br|amazon\.com|amzn\.to|amzn\.com|a\.co|aliexpress\.com|aliexpress\.us|magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br|bit\.ly|tinyurl\.com|cutt\.ly|t\.ly|is\.gd|ow\.ly|rebrand\.ly|encurtador\.com\.br|tiny\.cc)$/i;
+export function extractUrls(text) {
+  const out = []; const re = /https?:\/\/[^\s<>"'`)\]]+/gi; let m;
+  while ((m = re.exec(String(text || '')))) { const u = m[0].replace(/[.,;:!?*_~]+$/, ''); if (u.length > 12 && u.length < 600 && !out.includes(u)) out.push(u); }
+  return out;
+}
+export function identifyProduct(url) {
+  let u; try { u = parseUrl(url); } catch { return null; }
+  const h = u.hostname; const p = u.pathname || '';
+  if (/(^|\.)(mercadolivre\.com\.br|mercadolibre\.com|mercadolivre\.com)$/.test(h)) { const m = /MLB-?(\d{6,})/i.exec(p); return m ? { platform: 'mercadolivre', external_id: 'MLB' + m[1] } : null; }
+  if (/(^|\.)shopee\.com(\.br)?$/.test(h)) { const m = /\/product\/(\d+)\/(\d+)/.exec(p) || /-i\.(\d+)\.(\d+)/.exec(p) || /\/(\d{5,})\/(\d{5,})(?:\/|$)/.exec(p); return m ? { platform: 'shopee', external_id: `${m[1]}.${m[2]}` } : null; }
+  if (/(^|\.)amazon\.com(\.br)?$/.test(h)) { const m = /\/(?:dp|gp\/product|d|gp\/aw\/d)\/([A-Za-z0-9]{10})(?:[/?]|$)/.exec(p); return m ? { platform: 'amazon', external_id: m[1].toUpperCase() } : null; }
+  if (/(^|\.)aliexpress\.(com|us)$/.test(h)) { const m = /\/item\/(\d{6,})/.exec(p) || /\/i\/(\d{6,})/.exec(p); return m ? { platform: 'aliexpress', external_id: m[1] } : null; }
+  if (/(^|\.)(magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br)$/.test(h)) { const m = /\/p\/([a-z0-9]{6,})/i.exec(p); return m ? { platform: 'magalu', external_id: m[1].toLowerCase() } : null; }
+  return null;
+}
+export function parsePrices(text) {
+  const vals = []; const re = /R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{1,2})?|[0-9]+(?:,[0-9]{1,2})?)/g; let m;
+  while ((m = re.exec(String(text || '')))) { const v = Number(m[1].replace(/\./g, '').replace(',', '.')); if (v > 0 && v < 1e7) vals.push(v); }
+  return vals.length ? { price: Math.min(...vals), previous: vals.length > 1 ? Math.max(...vals) : null } : {};
+}
+const absUrl = (loc, base) => { try { if (/^https?:\/\//i.test(loc)) return loc; const b = parseUrl(base); return b.protocol + '//' + b.host + (loc.startsWith('/') ? loc : '/' + loc); } catch { return ''; } };
+
+// Segue encurtadores um salto por vez, só por domínios conhecidos (anti-SSRF), e identifica loja e produto.
+export async function resolveLink(ctx, url) {
+  const key = await (ctx.sha256hex || sha256Hex)(url);
+  const cached = await ctx.rpc('link_cache_get', { p_hash: key }).catch(() => null);
+  if (cached && (cached.platform || cached.final_url)) return cached;
+  let cur = url; let found = identifyProduct(cur);
+  for (let hop = 0; hop < 5 && !found; hop++) {
+    let host = ''; try { host = parseUrl(cur).hostname; } catch { break; }
+    if (!(ctx.followHost || FOLLOW_HOST).test(host)) break;
+    let r; try { r = await ctx.http({ method: 'GET', url: cur, redirect: 'manual', timeoutMs: 8000, headers: { 'user-agent': 'Mozilla/5.0 (compatible; CentralPromocoes/1.0)', accept: 'text/html' } }); } catch { break; }
+    const loc = r.location || (r.headers && r.headers.location);
+    if (r.status >= 300 && r.status < 400 && loc) { cur = absUrl(String(loc), cur); found = identifyProduct(cur); continue; }
+    if (typeof r.data === 'string') { // alguns encurtadores devolvem uma página com o destino no HTML
+      for (const cand of extractUrls(r.data.slice(0, 60000)).slice(0, 40)) { const f = identifyProduct(cand); if (f) { cur = cand; found = f; break; } }
+    }
+    break;
+  }
+  const out = { final_url: cur, platform: found ? found.platform : null, external_id: found ? found.external_id : null };
+  await ctx.rpc('link_cache_put', { p_hash: key, p_final: cur, p_platform: out.platform, p_external: out.external_id }).catch(() => {});
+  return out;
+}
+
+export async function processRadarMessage(ctx, rt, msg, state) {
+  const src = msg.source || {}; const platforms = Array.isArray(src.platforms) ? src.platforms : []; const blocked = Array.isArray(src.blocked_words) ? src.blocked_words : [];
+  const tp = parsePrices(msg.body); const results = [];
+  for (const url of extractUrls(msg.body).slice(0, 3)) {
+    const rec = (status, reason, extra = {}) => ctx.rpc('record_captured_link', { p: { source_id: src.id, chat_message_id: msg.id, original_url: url, status, reason, ...extra } }).catch(() => {});
+    try {
+      const rl = await resolveLink(ctx, url);
+      const base = { final_url: rl.final_url, platform: rl.platform, external_id: rl.external_id };
+      if (!rl.platform) { await rec('ignored', 'Link que não é de uma loja suportada', base); results.push('ignored'); continue; }
+      if (platforms.length && !platforms.includes(rl.platform)) { await rec('filtered', 'Loja fora das aceitas por esta fonte', base); results.push('filtered'); continue; }
+      const conn = connectorOf(rt, rl.platform); const cfg = conn.config || {};
+      if (['disabled', 'paused_policy', 'error'].includes(conn.mode)) { await rec('ineligible', `Conector ${STORE_LABEL[rl.platform] || rl.platform} desligado`, base); results.push('ineligible'); continue; }
+      const cur = await fetchCurrent(ctx, rt, rl.platform, rl.external_id);
+      if (cur.supported === false) { await rec('ineligible', cur.reason, base); results.push('ineligible'); continue; }
+      if (!cur.found) { await rec('ineligible', 'Produto não encontrado no seu programa de afiliados (não dá para gerar o seu link)', base); results.push('ineligible'); continue; }
+      const it = cur.item;
+      if (!affiliateUrl(it, cfg)) { await rec('ineligible', 'Sem link de afiliado: configure o modelo do link no conector', base); results.push('ineligible'); continue; }
+      const low = it.title.toLowerCase();
+      const hit = blocked.find((w) => w && low.includes(String(w).toLowerCase()));
+      if (hit) { await rec('filtered', `Palavra bloqueada: ${hit}`, base); results.push('filtered'); continue; }
+      if (it.used) { await rec('filtered', 'Produto usado', base); results.push('filtered'); continue; }
+      if (it.stock != null && it.stock <= 0) { await rec('filtered', 'Sem estoque', base); results.push('filtered'); continue; }
+      const minD = src.min_discount_pct != null ? Number(src.min_discount_pct) : Number(cfg.min_discount_pct || 0);
+      if (minD > 0 && pctOff(it.price, it.previous) < minD) { await rec('filtered', `Desconto comprovado abaixo de ${minD}%`, base); results.push('filtered'); continue; }
+      if ((cfg.min_price != null && it.price < Number(cfg.min_price)) || (cfg.max_price != null && it.price > Number(cfg.max_price))) { await rec('filtered', 'Fora da faixa de preço do conector', base); results.push('filtered'); continue; }
+      if (tp.price && it.price > tp.price * 1.2) { await rec('filtered', `Preço atual (R$ ${it.price}) acima do anunciado (R$ ${tp.price}): promoção encerrada?`, base); results.push('filtered'); continue; }
+      const done = (state.created[src.id] || 0) + Number(src.created_last_hour || 0);
+      if (done >= Number(src.max_per_hour || 20)) { await rec('filtered', 'Limite por hora da fonte atingido', base); results.push('filtered'); continue; }
+      const res = await ingestStoreItem(ctx, rt, rl.platform, cfg, it, { layer: 'C', sourceName: `Radar: ${msg.chat_title || 'grupo'}`.slice(0, 80), autoOk: src.mode === 'auto',
+        evidence: { fonte: msg.chat_title, canal: msg.channel, preco_no_texto: tp.price ?? undefined } });
+      if (res.status === 'created') {
+        state.created[src.id] = (state.created[src.id] || 0) + 1;
+        await ctx.rpc('register_offer_source', { p_offer: res.offer_id, p_source: src.id }).catch(() => {});
+        await rec('offer_created', `Score ${res.score ?? '—'}`, { ...base, offer_id: res.offer_id }); results.push('created');
+      } else if (res.status === 'duplicate') {
+        if (res.offer_id) await ctx.rpc('register_offer_source', { p_offer: res.offer_id, p_source: src.id }).catch(() => {});
+        await rec('duplicate', res.reason === 'recently_published' ? 'Já publicado recentemente' : 'Já está na fila', { ...base, offer_id: res.offer_id }); results.push('duplicate');
+      } else { await rec('filtered', 'Recusada pelas regras: ' + ((res.failures || []).map((f) => f.code).join(', ') || 'motivo não informado'), base); results.push('filtered'); }
+    } catch (e) { await rec('error', clean(e && e.message), {}); results.push('error'); }
+  }
+  return results;
+}
+
+export async function runRadar(ctx, { max = 10 } = {}) {
+  const msgs = await ctx.rpc('claim_radar_messages', { p_limit: max });
+  if (!Array.isArray(msgs) || !msgs.length) return { messages: 0 };
+  const rt = await loadRuntime(ctx); const state = { created: {} }; const tally = {};
+  for (const m of msgs) { try { for (const r of await processRadarMessage(ctx, rt, m, state)) tally[r] = (tally[r] || 0) + 1; } catch { tally.error = (tally.error || 0) + 1; } }
+  return { messages: msgs.length, ...tally };
+}
+
+// Teste manual de um link (botão do painel): mostra cada etapa, sem criar nada.
+async function radarTest(ctx, rt, url) {
+  const steps = []; const add = (label, ok, detail) => steps.push({ label, ok: !!ok, detail: String(detail || '') });
+  const rl = await resolveLink(ctx, url);
+  add('Seguir o link até a loja', !!rl.platform, rl.platform ? `${STORE_LABEL[rl.platform] || rl.platform} · produto ${rl.external_id}` : 'Não é um link de produto de uma loja suportada');
+  const out = { ok: false, steps, final_url: rl.final_url, platform: rl.platform, external_id: rl.external_id };
+  if (!rl.platform) return out;
+  const cfg = connectorOf(rt, rl.platform).config || {};
+  const cur = await fetchCurrent(ctx, rt, rl.platform, rl.external_id).catch((e) => ({ error: clean(e && e.message) }));
+  if (cur.error) { add('Consultar o produto na API da loja', false, cur.error); return out; }
+  if (cur.supported === false) { add('Consultar o produto na API da loja', false, cur.reason); return out; }
+  add('Consultar o produto na API da loja', cur.found, cur.found ? `${cur.item.title.slice(0, 70)} · R$ ${cur.item.price}${cur.item.previous ? ` (antes R$ ${cur.item.previous})` : ''}` : 'Não encontrado no seu programa de afiliados');
+  if (!cur.found) return out;
+  const aff = affiliateUrl(cur.item, cfg);
+  add('Gerar o seu link de afiliado', !!aff, aff ? maskUrl(aff) : 'Sem link: configure o modelo do link no conector');
+  out.item = previewItem(cur.item); out.affiliate_ok = !!aff; out.ok = !!aff;
+  return out;
+}
+
+/* ================================================================== Automação, acompanhamento, comissões, alertas e limpeza */
+export async function runAutomation(ctx) {
+  const out = {};
+  try { out.auto = await ctx.rpc('run_auto_approve', { p_limit: 10 }); } catch (e) { out.auto = { error: clean(e && e.message) }; }
+  try { out.expired = await ctx.rpc('expire_offers', {}); } catch { /* segue */ }
+  return out;
+}
+
+export async function runWatchlist(ctx) {
+  const due = await ctx.rpc('watchlist_due', { p_limit: 8 });
+  if (!Array.isArray(due) || !due.length) return { checked: 0 };
+  const rt = await loadRuntime(ctx); let offers = 0;
+  for (const w of due) {
+    let cur = null; try { cur = await fetchCurrent(ctx, rt, w.platform, w.external_id); } catch { cur = null; }
+    if (!cur || !cur.found || !cur.item) { await ctx.rpc('watchlist_update', { p_id: w.id, p_price: null, p_title: null, p_offer: false }).catch(() => {}); continue; }
+    const it = cur.item; const last = w.last_price != null ? Number(w.last_price) : null;
+    const drop = last && it.price < last ? (last - it.price) / last * 100 : 0;
+    const hit = (w.target_price != null && it.price <= Number(w.target_price)) || drop >= Number(w.min_drop_pct || 10);
+    let offered = false;
+    if (hit && (it.stock == null || it.stock > 0)) {
+      const cfg = connectorOf(rt, w.platform).config || {};
+      const res = await ingestStoreItem(ctx, rt, w.platform, cfg, { ...it, previous: last && last > it.price ? last : it.previous }, { sourceName: 'Produto acompanhado', evidence: { acompanhado: true, ultimo_preco: last ?? undefined } }).catch(() => ({}));
+      offered = res.status === 'created'; if (offered) offers++;
+    }
+    await ctx.rpc('watchlist_update', { p_id: w.id, p_price: it.price, p_title: it.title, p_offer: offered, p_image: it.image || null }).catch(() => {});
+  }
+  return { checked: due.length, offers };
+}
+
+export async function runCommissionSync(ctx) {
+  const rt = await loadRuntime(ctx); const cfg = connectorOf(rt, 'shopee').config || {};
+  if (!credsOk('shopee', cfg, rt.secrets)) return { skipped: 'Shopee não configurada' };
+  if (!(await ctx.rpc('job_should_run', { p_key: 'commissions', p_every_min: 120 }).catch(() => false))) return { skipped: 'intervalo' };
+  const end = Math.floor(ctx.now().getTime() / 1000), start = end - 30 * 86400;
+  const q = (f) => `query{ conversionReport(purchaseTimeStart:${start}, purchaseTimeEnd:${end}, limit:100){ nodes{ ${f} } } }`; let d;
+  try { d = await shopeeCall(ctx, cfg, rt.secrets.shopee_secret, q('conversionId purchaseTime totalCommission utmContent')); }
+  catch (e) { if (!/field|cannot query|validation/i.test(String(e.message))) throw e; d = await shopeeCall(ctx, cfg, rt.secrets.shopee_secret, q('purchaseTime totalCommission')); }
+  const nodes = (d && d.conversionReport && d.conversionReport.nodes) || [];
+  const rows = nodes.map((n, i) => ({ platform: 'shopee', external_ref: String(n.conversionId || `${n.purchaseTime}-${i}`), purchased_at: new Date(Number(n.purchaseTime) * 1000).toISOString(), amount: round2(Number(n.totalCommission) || 0), sub_id: n.utmContent || undefined })).filter((r) => r.purchased_at !== 'Invalid Date');
+  const n = rows.length ? await ctx.rpc('upsert_commissions', { p: rows }) : 0;
+  return { synced: Number(n) || 0 };
+}
+
+export async function runAlerts(ctx) {
+  const snap = await ctx.rpc('ops_snapshot', {}).catch(() => null); if (!snap) return {};
+  const rt = await loadRuntime(ctx); const fired = [];
+  const check = async (key, bad, text) => {
+    if (!bad) { await ctx.rpc('alert_clear', { p_key: key }).catch(() => {}); return; }
+    if (await ctx.rpc('alert_should_send', { p_key: key, p_detail: text.slice(0, 200) }).catch(() => false)) { await alertAll(ctx, rt, text); fired.push(key); }
+  };
+  await check('pending_old', snap.pending_old > 0, `⚠️ ${snap.pending_old} publicação(ões) aguardando há mais de 45 min. Confira Publicações e o estado do WhatsApp/Telegram.`);
+  await check('unknown', snap.unknown > 0, `❓ ${snap.unknown} publicação(ões) com resultado incerto. Confira no canal antes de reenviar (Publicações).`);
+  await check('failed', snap.failed_24h >= 3, `❌ ${snap.failed_24h} publicações falharam de vez nas últimas 24 h. Veja Publicações.`);
+  await check('collect', Array.isArray(snap.collect_errors) && snap.collect_errors.length > 0, `⚠️ Coleta com erro: ${(snap.collect_errors || []).map((c) => `${c.platform} (${c.error})`).join('; ')}`);
+  await check('review', snap.review_waiting >= 20, `📥 ${snap.review_waiting} ofertas aguardando a sua aprovação.`);
+  const ml = rt.status.mercadolivre || {};
+  await check('ml_reconnect', !!rt.secrets.ml_refresh_token && ml.ok === false && /conecte a conta|renova/i.test(String(ml.error || '')), '🔑 O acesso à conta do Mercado Livre expirou. Reconecte em Conectores → Mercado Livre → Conectar conta.');
+  return { fired };
+}
+
+export async function runHousekeeping(ctx) {
+  const go = await ctx.rpc('job_should_run', { p_key: 'housekeeping', p_every_min: 360 }).catch(() => false);
+  return go ? ctx.rpc('housekeeping', {}) : null;
+}
+
+export async function termsForRt(ctx, rt, provider, cfg) {
+  const kw = Array.isArray(cfg.keywords) ? cfg.keywords.filter((k) => typeof k === 'string' && k.trim()) : [];
+  if (kw.length) return kw.map((q) => ({ q: q.trim(), cat: undefined }));
+  const cats = Array.isArray(cfg.categories) && cfg.categories.length ? cfg.categories : ['eletronicos', 'informatica', 'casa']; const custom = rt.search_terms || {};
+  const list = cats.flatMap((c) => (Array.isArray(custom[c]) && custom[c].length ? custom[c] : SEARCH_TERMS[c] || []).map((q) => ({ q, cat: c })));
+  if (provider === 'mercadolivre' && cfg.use_trends !== false) {
+    try { const tr = await mlGet(ctx, rt, '/trends/MLB'); for (const t of (Array.isArray(tr) ? tr : []).slice(0, 3)) if (t && t.keyword) list.push({ q: String(t.keyword).slice(0, 60), cat: undefined }); } catch { /* sem tendências */ }
+  }
+  return list;
+}
+function tgBody(m, text) {
+  const ents = [...(m.entities || []), ...(m.caption_entities || [])].filter((e) => e && e.type === 'text_link' && e.url).map((e) => e.url);
+  const btns = ((m.reply_markup && m.reply_markup.inline_keyboard) || []).flat().map((b) => b && b.url).filter(Boolean);
+  const extra = [...new Set([...ents, ...btns])].filter((u) => !String(text || '').includes(u));
+  return [text, ...extra].filter(Boolean).join('\n');
+}
+
+/* ================================================================== Conexões gerenciadas pelo servidor (arquivo worker.env) */
+// Endereço, instância e chave da Evolution, token do Telegram e endereços de webhook vêm do ambiente do worker (ctx.managed).
+// Quando existem, valem mais que o cadastro do banco e o painel não pede nada disso.
+function applyManaged(ctx, rt) {
+  const m = ctx.managed || {}; rt.managed = { evolution: {}, telegram: {} };
+  const e = m.evolution || {};
+  if (e.base_url) { rt.evolution.base_url = e.base_url; rt.managed.evolution.base_url = true; }
+  if (e.instance) { rt.evolution.instance = e.instance; rt.managed.evolution.instance = true; }
+  if (e.api_key) { rt.secrets.evolution_api_key = e.api_key; rt.managed.evolution.api_key = true; }
+  if (e.webhook_url) { rt.evolution.webhook_url = e.webhook_url; rt.managed.evolution.webhook = true; }
+  const t = m.telegram || {};
+  if (t.bot_token) { rt.secrets.telegram_bot_token = t.bot_token; rt.managed.telegram.token = true; }
+  if (t.webhook_url) { rt.telegram.webhook_url = t.webhook_url; rt.telegram.mode = 'webhook'; rt.managed.telegram.webhook = true; }
+  if (t.webhook_secret) rt.secrets.telegram_webhook_secret = t.webhook_secret;
 }
