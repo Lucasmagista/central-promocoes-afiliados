@@ -91,7 +91,7 @@ const tgSrv = await listen(async (req, res) => {
 });
 
 /* ---------- Mercado Livre e Shopee falsos ---------- */
-const mlState = { itemPrice: 0, itemQty: 5, access: ML_ACCESS, refresh: 'ref' + rnd(20), refreshCalls: 0, searchStatus: 200 };
+const mlState = { itemPrice: 0, itemQty: 5, access: ML_ACCESS, refresh: 'ref' + rnd(20), refreshCalls: 0, searchStatus: 200, catalog: false, catalogCalls: 0 };
 const ml = await listen(async (req, res) => {
   const body = await readBody(req);
   if (req.url === '/oauth/token') {
@@ -105,6 +105,10 @@ const ml = await listen(async (req, res) => {
   const authed = req.headers.authorization === 'Bearer ' + ML_ACCESS || req.headers.authorization === 'Bearer ' + mlState.access;
   if (req.url.startsWith('/items/')) { if (!authed) return send(res, 403, { message: 'forbidden' }); const id = req.url.split('/items/')[1]; if (id === 'MLB1') return send(res, 200, { id: 'MLB1', title: 'Fone Bluetooth Bom', price: mlState.itemPrice || 80, original_price: 160, available_quantity: mlState.itemQty ?? 5, status: 'active', condition: 'new', permalink: 'https://produto.mercadolivre.com.br/MLB-1-fone', thumbnail: 'http://http2.mlstatic.com/D_1-I.jpg', sold_quantity: 200 }); return send(res, 404, { message: 'not found' }); }
   if (req.url === '/users/me') return authed ? send(res, 200, { id: 99, nickname: 'LUCAS_AFILIADO', site_id: 'MLB', permalink: 'https://perfil.mercadolivre.com.br/LUCAS_AFILIADO', seller_reputation: { level_id: '5_green', power_seller_status: 'gold' } }) : send(res, 401, { message: 'invalid_token' });
+  // catálogo (liberado mesmo quando /sites/MLB/search responde 403)
+  if (req.url.startsWith('/products/search')) { if (!authed || !mlState.catalog) return send(res, mlState.catalog ? 403 : 404, { message: 'x' }); mlState.catalogCalls++; return send(res, 200, { paging: { total: 1 }, results: [{ id: 'MLB10', name: 'Fone Catálogo Bluetooth', pictures: [{ url: 'http://http2.mlstatic.com/D_10.jpg' }] }] }); }
+  if (/^\/products\/MLB10\/items/.test(req.url)) { if (!authed || !mlState.catalog) return send(res, 404, {}); return send(res, 200, { results: [{ item_id: 'MLB900', price: 120, original_price: 240, condition: 'used' }, { item_id: 'MLB901', price: 90, original_price: 180, condition: 'new', shipping: { free_shipping: true } }] }); }
+  if (/^\/products\/MLB10$/.test(req.url)) { if (!authed || !mlState.catalog) return send(res, 404, {}); return send(res, 200, { id: 'MLB10', name: 'Fone Catálogo Bluetooth', pictures: [{ url: 'http://http2.mlstatic.com/D_10.jpg' }] }); }
   if (req.url.startsWith('/sites/MLB/search')) {
     if (!authed) return send(res, 403, { message: 'forbidden' });
     if (mlState.searchStatus !== 200) return send(res, mlState.searchStatus, { message: 'blocked' });
@@ -505,8 +509,13 @@ db.secrets.ml_token_expires_at = '1'; db.secrets.ml_refresh_token = 'invalido' +
 j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
 ok(j.result.ok === false && /Conecte a conta de novo/.test(j.result.error) && db.status.mercadolivre.ok === false, 'ML: renovação recusada vira aviso para reconectar');
 db.secrets.ml_refresh_token = mlState.refresh; db.secrets.ml_access_token = mlState.access; db.secrets.ml_token_expires_at = String(Math.floor(Date.now() / 1000) + 3600);
-mlState.searchStatus = 403; j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
-ok(j.result.ok === true && j.result.partial === true && /403/.test(j.result.search_error), 'ML: conta conectada mas busca bloqueada vira "atenção" explicando o 403');
+mlState.searchStatus = 403; mlState.catalog = true; j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === true && !j.result.partial && j.result.sample && j.result.sample.length === 1, 'ML: busca 403 cai no catálogo e devolve a amostra');
+ok(j.result.sample[0].price === 90 && j.result.sample[0].title === 'Fone Catálogo Bluetooth', 'ML catálogo: usa a menor oferta NOVA (ignora a usada mais barata do que o preço cheio)');
+ok(mlState.catalogCalls === 1, 'ML catálogo: uma consulta de busca por verificação');
+mlState.catalog = false;
+j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === true && j.result.partial === true && /40[34]/.test(j.result.search_error), 'ML: busca e catálogo bloqueados viram "atenção" explicando o erro');
 j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
 ok(j.status === 'failed' && db.runs.at(-1).status === 'error', 'ML: falha na coleta registra execução com erro');
 mlState.searchStatus = 200;

@@ -294,7 +294,36 @@ export function mlItem(it) {
     image: it.thumbnail ? String(it.thumbnail).replace(/^http:/, 'https:').replace(/-I\.(jpg|webp)$/, '-O.$1') : null, seller: it.seller && it.seller.nickname || null,
     stock: it.available_quantity == null ? null : Number(it.available_quantity), used: !!it.condition && it.condition !== 'new', sold: Number(it.sold_quantity) || null, free_shipping: !!(it.shipping && it.shipping.free_shipping) };
 }
-async function mlSearch(ctx, rt, q, limit, offset = 0) { const d = await mlGet(ctx, rt, `/sites/MLB/search?q=${encodeURIComponent(q)}&limit=${limit}${offset > 0 ? `&offset=${offset}` : ''}`); return ((d && d.results) || []).map(mlItem); }
+/* Desde 2025 o Mercado Livre responde 403 em /sites/MLB/search para a maioria dos aplicativos (a conta conecta e /users/me funciona).
+   O catálogo continua liberado: /products/search acha o produto e /products/{id}/items traz as ofertas (preço, frete, vendedor).
+   Por isso a busca tenta o caminho normal uma vez e, se vier 403, passa a usar o catálogo pelo resto da execução. */
+const mlMenor = (offers) => {
+  const ok = (offers || []).filter((o) => o && Number(o.price) > 0 && (!o.condition || o.condition === 'new')).sort((a, b) => Number(a.price) - Number(b.price));
+  return ok[0] || null;
+};
+function mlCatalogItem(p, o) {
+  const pic = p.pictures && p.pictures[0] && (p.pictures[0].url || p.pictures[0].secure_url); const price = Number(o.price) || 0; const prev = o.original_price != null ? Number(o.original_price) : null;
+  return { external_id: String(p.id), title: String(p.name || '').trim(), price, previous: prev && prev > price ? prev : null, url: 'https://www.mercadolivre.com.br/p/' + p.id, affiliate_url: '',
+    image: pic ? String(pic).replace(/^http:/, 'https:') : null, seller: null, stock: null, used: false, sold: null, free_shipping: !!(o.shipping && o.shipping.free_shipping) };
+}
+async function mlCatalogOffer(ctx, rt, p) {
+  try { const d = await mlGet(ctx, rt, `/products/${p.id}/items`); const o = mlMenor(d && d.results); return o ? mlCatalogItem(p, o) : null; }
+  catch (e) { if (e && (e.status === 404 || e.status === 429)) return null; throw e; }
+}
+async function mlCatalogSearch(ctx, rt, q, limit, offset = 0) {
+  const n = Math.max(1, Math.min(Number(limit) || 15, 15));
+  const d = await mlGet(ctx, rt, `/products/search?status=active&site_id=MLB&q=${encodeURIComponent(q)}&limit=${n}${offset > 0 ? `&offset=${offset}` : ''}`);
+  const out = [];
+  for (const p of (d && d.results) || []) { const it = await mlCatalogOffer(ctx, rt, p); if (it) out.push(it); if (ctx.sleep) await ctx.sleep(250); }
+  return out;
+}
+async function mlSearch(ctx, rt, q, limit, offset = 0) {
+  if (!rt.ml_catalog_only) {
+    try { const d = await mlGet(ctx, rt, `/sites/MLB/search?q=${encodeURIComponent(q)}&limit=${limit}${offset > 0 ? `&offset=${offset}` : ''}`); return ((d && d.results) || []).map(mlItem); }
+    catch (e) { if (!(e && e.status === 403)) throw e; rt.ml_catalog_only = true; }
+  }
+  return mlCatalogSearch(ctx, rt, q, limit, offset);
+}
 async function mlAccount(ctx, rt) {
   const d = (await mlGet(ctx, rt, '/users/me')) || {}; const rep = d.seller_reputation || {};
   return { id: String(d.id || ''), nickname: d.nickname || null, site: d.site_id || null, permalink: d.permalink || null, level: rep.level_id || null, power_seller: rep.power_seller_status || null, registered: d.registration_date || null };
@@ -1032,7 +1061,17 @@ export async function fetchCurrent(ctx, rt, platform, externalId) {
   if (platform === 'mercadolivre') {
     if (!(sec.ml_refresh_token || sec.ml_access_token)) return { supported: false, reason: 'Conta do Mercado Livre não conectada' };
     if (!/^MLB\d+$/.test(String(externalId))) return { supported: false, reason: 'Identificador do Mercado Livre inválido' };
-    try { const d = await mlGet(ctx, rt, `/items/${externalId}`); return d && d.id ? { found: true, item: normMl(d) } : { found: false }; } catch (e) { if (e && e.status === 404) return { found: false }; throw e; }
+    try { const d = await mlGet(ctx, rt, `/items/${externalId}`); return d && d.id ? { found: true, item: normMl(d) } : { found: false }; }
+    catch (e) {
+      if (e && (e.status === 403 || e.status === 404)) {
+        // anúncio de outro vendedor é bloqueado para o aplicativo; se o código for de produto de catálogo, as ofertas ainda saem de /products
+        try { const p = await mlGet(ctx, rt, `/products/${externalId}`); const it = p && p.id ? await mlCatalogOffer(ctx, rt, p) : null; if (it) return { found: true, item: it }; }
+        catch (e2) { if (!(e2 && (e2.status === 404 || e2.status === 403))) throw e2; }
+        if (e.status === 403) return { supported: false, reason: 'O Mercado Livre não libera o preço de anúncios individuais para este aplicativo (só produtos de catálogo).' };
+        return { found: false };
+      }
+      throw e;
+    }
   }
   if (platform === 'shopee') {
     const itemId = String(externalId).split('.').pop(); if (!/^\d+$/.test(itemId)) return { supported: false, reason: 'Identificador da Shopee inválido' };
