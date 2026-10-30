@@ -640,6 +640,9 @@ async function integrationTask(ctx, rt, payload) {
     if (action === 'run_sender') return { sender: await runSender(ctx, { budgetMs: 40000, maxPerRun: 10 }) };
   }
   if (provider === 'database' && action === 'apply_migrations') return applyDatabaseMigrations(ctx, rt);
+  if (provider === 'ai' && action === 'test') return aiTest(ctx, rt, payload);
+  if (provider === 'collector' && action === 'status') return rt.status.collector || {};
+  if (provider === 'shopee' && action === 'import_feed') return importShopeeFeed(ctx, rt, { dry: !!payload.dry });
   if (provider === 'evolution') {
     const cfg = rt.evolution; const ev = evolutionClient(ctx, cfg, rt.secrets.evolution_api_key);
     need(ev.ready(), 'Informe o endereço da Evolution e a chave de acesso (aba WhatsApp).');
@@ -1109,10 +1112,10 @@ async function guessCategory(ctx, title) {
   const s = await ctx.rpc('category_guess', { p_text: String(title || '').slice(0, 300) }).catch(() => null);
   return typeof s === 'string' && s ? s : undefined;
 }
-async function ingestStoreItem(ctx, rt, provider, cfg, it, { layer = 'A', sourceName, evidence = {}, autoOk = false } = {}) {
+async function ingestStoreItem(ctx, rt, provider, cfg, it, { layer = 'A', sourceName, evidence = {}, autoOk = false, kind = 'api' } = {}) {
   const category = it.category || await guessCategory(ctx, it.title);
   const res = (await ctx.rpc('ingest_offer', { p: { platform: provider, external_id: it.external_id, original_url: it.url, affiliate_url: affiliateUrl(it, cfg), title: it.title.slice(0, 300), price: it.price, previous_price: it.previous || undefined,
-    image_url: it.image || undefined, seller_name: it.seller || undefined, category, source_kind: 'api', source_layer: layer, source_name: sourceName || SOURCE_NAME[provider],
+    image_url: it.image || undefined, seller_name: it.seller || undefined, category, source_kind: kind, source_layer: layer, source_name: sourceName || SOURCE_NAME[provider],
     availability: it.stock != null ? (it.stock > 0 ? 'in_stock' : 'out_of_stock') : 'unknown', observed_at: ctx.now().toISOString(),
     evidence: { termo: it.term, comissao_pct: it.commission_pct ?? undefined, vendidos: it.sold ?? undefined, preco_anterior_derivado: it.derived_previous || undefined, ...evidence } } })) || {};
   if (res.status === 'created') {
@@ -1267,9 +1270,211 @@ async function radarTest(ctx, rt, url) {
   return out;
 }
 
+/* ================================================================== IA (OpenRouter): manchete com emoji + uma linha de benefício */
+const AI_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const aiState = { used: [], backoffUntil: 0 };
+const AI_TONES = { animado: 'animado e simpático, com 1 a 3 emojis', neutro: 'direto e informativo, no máximo 1 emoji', chamativo: 'chamativo, mas sem pressão falsa, com 2 a 3 emojis' };
+const DEFAULT_BANNED = ['garantido', 'últimas unidades', 'corre', 'corra', 'menor preço da história', 'só hoje', 'acaba hoje', 'última chance', 'vai acabar'];
+export function aiMessages(cfg, banned, it) {
+  const sys = [
+    'Você escreve legendas curtas para grupos de promoções no WhatsApp e no Telegram do Brasil.',
+    'Responda SOMENTE com um JSON: {"headline":"...","body":"..."}.',
+    'headline: até 90 caracteres, com o nome curto e claro do produto (sem repetir a marca, sem MAIÚSCULAS em excesso) e 1 emoji relevante no começo.',
+    'body: opcional (pode ser ""), até 120 caracteres, UM benefício concreto que esteja nos dados do produto.',
+    'Regras: português do Brasil; use apenas os dados fornecidos; NÃO invente preço, estoque, frete, cupom, prazo ou avaliação; NÃO escreva preço nem link (são adicionados à parte); NÃO use hashtags.',
+    'Nunca use estas expressões: ' + (banned && banned.length ? banned : DEFAULT_BANNED).join(', ') + '.',
+    'Tom: ' + (AI_TONES[cfg.tone] || AI_TONES.animado) + '.',
+  ];
+  if (cfg.style) sys.push('Instruções do dono do canal: ' + String(cfg.style).replace(/\s+/g, ' ').slice(0, 600));
+  const user = JSON.stringify({ produto: String(it.title || '').slice(0, 300), plataforma: it.platform || null, categoria: it.category || null, desconto_pct: it.discount_pct ?? null, tem_cupom: !!it.coupon, vendedor: it.seller || null });
+  return [{ role: 'system', content: sys.join('\n') }, { role: 'user', content: user }];
+}
+export function aiParse(text) {
+  let t = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  const a = t.indexOf('{'), b = t.lastIndexOf('}'); if (a >= 0 && b > a) t = t.slice(a, b + 1);
+  let j; try { j = JSON.parse(t); } catch { return null; }
+  const h = String((j && (j.headline || j.manchete)) || '').replace(/\s+/g, ' ').trim(); const body = String((j && (j.body || j.corpo)) || '').replace(/\s+/g, ' ').trim();
+  return h ? { headline: h.slice(0, 150), body: body.slice(0, 220) } : null;
+}
+function aiHttpError(r) {
+  const s = r.status; const why = msgOf(r.data);
+  const e = new Error(s === 401 ? 'Chave do OpenRouter recusada. Confira a chave na aba IA.' : s === 402 ? 'Sem créditos no OpenRouter. Adicione saldo na sua conta.' : s === 404 ? 'Modelo não encontrado no OpenRouter. Confira o nome do modelo.'
+    : s === 429 ? 'O OpenRouter pediu para esperar (limite de uso). A Central tenta de novo daqui a pouco.' : `O OpenRouter respondeu HTTP ${s}${why ? ': ' + why : ''}`);
+  e.status = s; e.fatal = s === 401 || s === 402 || s === 404; return e;
+}
+async function aiCall(ctx, key, cfg, messages) {
+  const body = { model: String(cfg.model), messages, temperature: Number.isFinite(Number(cfg.temperature)) ? Math.max(0, Math.min(Number(cfg.temperature), 1.5)) : 0.8, max_tokens: 300, response_format: { type: 'json_object' } };
+  const call = () => ctx.http({ method: 'POST', url: (ctx.urls && ctx.urls.openrouter) || AI_URL, headers: { Authorization: `Bearer ${key}`, 'HTTP-Referer': 'https://central-de-promocoes', 'X-Title': 'Central de Promocoes' }, json: body, timeoutMs: 45000 });
+  let r = await call();
+  if (r.status === 400 && /response_format|json_object|structured/i.test(JSON.stringify(r.data || {}))) { delete body.response_format; r = await call(); }
+  if (r.status >= 400) throw aiHttpError(r);
+  const m = r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message; const c = m && m.content;
+  const p = aiParse(Array.isArray(c) ? c.map((x) => (x && x.text) || '').join('') : c);
+  if (!p) { const e = new Error('A IA não devolveu a legenda no formato esperado'); e.soft = true; throw e; }
+  return { ...p, model: (r.data && r.data.model) || cfg.model };
+}
+const aiConfigOf = async (ctx) => { const c = await ctx.rpc('worker_setting', { p_key: 'ai_config' }).catch(() => null); return c && typeof c === 'object' ? c : {}; };
+const bannedOf = async (ctx) => { const b = await ctx.rpc('worker_setting', { p_key: 'banned_terms' }).catch(() => null); return Array.isArray(b) ? b.map(String) : DEFAULT_BANNED; };
+export async function aiTest(ctx, rt, payload) {
+  const cfg = await aiConfigOf(ctx); need(cfg.model, 'Escolha o modelo e clique em Salvar antes de testar.');
+  need(rt.secrets.openrouter_api_key, 'Cole a chave do OpenRouter e clique em Guardar chave.');
+  const it = { title: payload.title || 'Fone de Ouvido Bluetooth TWS Sem Fio com Cancelamento de Ruído e Estojo de Carregamento', platform: 'shopee', category: 'eletronicos', discount_pct: 52 };
+  const t0 = ctx.now().getTime(); const g = await aiCall(ctx, rt.secrets.openrouter_api_key, cfg, aiMessages(cfg, await bannedOf(ctx), it));
+  const out = { headline: g.headline, body: g.body, model: g.model, ms: ctx.now().getTime() - t0 };
+  await ctx.rpc('worker_set_status', { p_key: 'ai', p_status: { ok: true, last_test_at: ctx.now().toISOString(), model: g.model } }).catch(() => {});
+  return out;
+}
+// Gera a legenda das ofertas em revisão (as de maior score primeiro, que são as que o modo automático aprova antes).
+export async function aiFill(ctx, { limit = 8 } = {}) {
+  const now = ctx.now().getTime(); if (now < aiState.backoffUntil) return { skipped: 'pausada depois de um erro' };
+  const cfg = await aiConfigOf(ctx); if (cfg.enabled !== true || !cfg.model) return { skipped: true };
+  aiState.used = aiState.used.filter((t) => now - t < 3600000);
+  const room = Math.max(1, Math.min(Number(cfg.max_per_hour) || 120, 1000)) - aiState.used.length; if (room <= 0) return { skipped: 'limite por hora' };
+  const rt = await loadRuntime(ctx); const key = rt.secrets.openrouter_api_key; if (!key) return { skipped: 'sem chave' };
+  const list = await ctx.rpc('list_offers_for_ai', { p_limit: Math.min(limit, room) }); if (!Array.isArray(list) || !list.length) return { done: 0 };
+  const banned = await bannedOf(ctx); let done = 0, failed = 0, fatal = null; const queue = list.slice();
+  const one = async (it) => {
+    aiState.used.push(now);
+    try {
+      let g = await aiCall(ctx, key, cfg, aiMessages(cfg, banned, it));
+      let res = await ctx.rpc('set_offer_ai_text', { p_offer: it.id, p_headline: g.headline, p_body: g.body, p_model: g.model });
+      if (res && res.ok === false && res.violations) { // uma segunda chance, avisando o que não pode
+        const msgs = aiMessages(cfg, banned, it); msgs.push({ role: 'user', content: `Reescreva sem estas expressões: ${res.violations.join(', ')}.` });
+        g = await aiCall(ctx, key, cfg, msgs); res = await ctx.rpc('set_offer_ai_text', { p_offer: it.id, p_headline: g.headline, p_body: g.body, p_model: g.model });
+      }
+      if (res && res.ok) done++; else { await ctx.rpc('skip_offer_ai', { p_offer: it.id }).catch(() => {}); failed++; }
+    } catch (e) {
+      if (e && e.fatal) { fatal = e.message; queue.length = 0; return; }
+      if (e && e.soft) { await ctx.rpc('skip_offer_ai', { p_offer: it.id }).catch(() => {}); failed++; } else { failed++; if (e && e.status === 429) { aiState.backoffUntil = ctx.now().getTime() + 120000; queue.length = 0; } }
+    }
+  };
+  const worker = async () => { while (queue.length) await one(queue.shift()); };
+  await Promise.all([worker(), worker(), worker()]);
+  if (fatal) aiState.backoffUntil = ctx.now().getTime() + 600000;
+  await ctx.rpc('worker_set_status', { p_key: 'ai', p_status: fatal ? { ok: false, error: fatal } : { ok: true, last_run_at: ctx.now().toISOString(), done, failed } }).catch(() => {});
+  return { done, failed, error: fatal || undefined };
+}
+
+/* ================================================================== Feed de produtos da Shopee (CSV diário do portal de afiliados) */
+// Lê o CSV em fluxo (o arquivo "Shopee Oficial BR" tem ~200 MB) e devolve só as colunas pedidas.
+export async function* csvRecords(chunks, want) {
+  const dec = new TextDecoder('utf-8'); let head = null; let keepCol = null; let field = ''; let row = []; let q = false; let pending = false; const wantSet = new Set(want);
+  const mk = (r) => {
+    if (!head) { head = r.map((x) => x.replace(/^﻿/, '')); keepCol = head.map((h) => wantSet.has(h)); return null; }
+    if (r.length !== head.length) return null;
+    const o = {}; for (let i = 0; i < head.length; i++) if (keepCol[i]) o[head[i]] = r[i]; return o;
+  };
+  for await (const chunk of chunks) {
+    const s = typeof chunk === 'string' ? chunk : dec.decode(chunk, { stream: true });
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (pending) { pending = false; if (ch === '"') { if (!keepCol || keepCol[row.length]) field += '"'; continue; } q = false; }
+      if (q) { if (ch === '"') pending = true; else if (!keepCol || keepCol[row.length]) field += ch; continue; }
+      if (ch === '"') { q = true; continue; }
+      if (ch === ',') { row.push(field); field = ''; continue; }
+      if (ch === '\n') { row.push(field); field = ''; const r = row; row = []; const rec = mk(r); if (rec) yield rec; continue; }
+      if (ch !== '\r' && (!keepCol || keepCol[row.length])) field += ch;
+    }
+  }
+  if (field || row.length) { row.push(field); const rec = mk(row); if (rec) yield rec; }
+}
+const FEED_WANT = ['itemid', 'title', 'price', 'sale_price', 'discount_percentage', 'item_rating', 'image_link', 'product_link', 'product_short link', 'global_category1', 'shop_name'];
+const FEED_EXCLUDE = ['Spare Parts and Accessories for Vehicles', 'Books & Magazines', 'Food & Beverages', 'Health'];
+export function feedItem(r) {
+  const price = Number(r.price), sale = Number(r.sale_price); const cur = sale > 0 ? sale : price; const prev = price > cur ? price : null;
+  const m = /\/product\/(\d+)\/(\d+)/.exec(r.product_link || '');
+  return { external_id: m ? `${m[1]}.${m[2]}` : String(r.itemid || ''), title: String(r.title || '').replace(/\s+/g, ' ').trim(), price: round2(cur), previous: prev ? round2(prev) : null,
+    url: r.product_link || '', affiliate_url: r['product_short link'] || '', image: /^https:\/\//.test(r.image_link || '') ? r.image_link : null, rating: Number(r.item_rating) || null,
+    seller: r.shop_name || null, cat_src: r.global_category1 || '', stock: null };
+}
+const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
+export async function importShopeeFeed(ctx, rt, { dry = false } = {}) {
+  const fc = (await ctx.rpc('worker_setting', { p_key: 'feed_config' }).catch(() => null)) || {};
+  const sources = (Array.isArray(fc.sources) ? fc.sources : []).filter((s) => s && s.value).slice(0, 3);
+  need(sources.length, 'Cadastre ao menos uma fonte do feed (endereço do arquivo ou nome do arquivo no servidor) em Configurações → Coleta.');
+  need(ctx.openFeed, 'Este worker não consegue abrir feeds.');
+  const f = { minD: num(fc.min_discount, 40), minR: num(fc.min_rating, 4.5), minP: num(fc.min_price, 0), maxP: num(fc.max_price, 100000), per: Math.max(1, Math.min(num(fc.per_run, 30), 100)),
+    exclude: new Set((Array.isArray(fc.exclude_categories) ? fc.exclude_categories : FEED_EXCLUDE).map(String)) };
+  const POOL = 400; let pool = []; let seen = 0, kept = 0; const t0 = ctx.now().getTime();
+  try {
+  for (const src of sources) {
+    for await (const r of csvRecords(await ctx.openFeed(src), FEED_WANT)) {
+      seen++; const it = feedItem(r);
+      if (!it.external_id || !it.title || !it.affiliate_url || !(it.price > 0) || !it.previous) continue;
+      const d = pctOff(it.price, it.previous);
+      if (d < f.minD || d > 95 || (it.rating || 0) < f.minR || it.price < f.minP || it.price > f.maxP || f.exclude.has(it.cat_src)) continue;
+      kept++; pool.push({ ...it, _s: d + ((it.rating || 4) - 4) * 10 });
+      if (pool.length > POOL * 2) { pool.sort((a, b) => b._s - a._s); pool = pool.slice(0, POOL); }
+    }
+  }
+  } catch (e) { // arquivo ausente, link vencido, formato inesperado: o painel mostra o motivo
+    await ctx.rpc('worker_set_status', { p_key: 'feed', p_status: { ok: false, last_import_at: ctx.now().toISOString(), error: clean(e && e.message) } }).catch(() => {});
+    throw e;
+  }
+  pool.sort((a, b) => b._s - a._s); pool = pool.slice(0, POOL);
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(ctx.rand() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; } // o dia seguinte não repete sempre os mesmos
+  const base = { seen, kept, sources: sources.length, ms: ctx.now().getTime() - t0 };
+  const conn = connectorOf(rt, 'shopee'); const warning = conn.mode === 'disabled' ? 'O conector da Shopee está desativado: ative-o em Conectores (modo manual serve) para poder aprovar essas ofertas.' : undefined;
+  if (dry) return { ok: true, dry: true, ...base, warning, items: pool.slice(0, 8).map((x) => ({ title: x.title.slice(0, 80), price: x.price, previous: x.previous, off: pctOff(x.price, x.previous), rating: x.rating })) };
+  const runId = await ctx.rpc('start_run', { p_platform: 'shopee' }).catch(() => null);
+  let created = 0, duplicates = 0, rejected = 0, attempts = 0; const reasons = {};
+  try {
+    for (const it of pool) {
+      if (created >= f.per || attempts >= f.per * 8) break; attempts++;
+      const res = await ingestStoreItem(ctx, rt, 'shopee', conn.config || {}, it, { sourceName: 'Feed de produtos da Shopee', kind: 'feed', evidence: { preco_anterior_declarado_pelo_vendedor: true } });
+      if (res.status === 'created') created++; else if (res.status === 'duplicate') duplicates++; else { rejected++; for (const x of res.failures || []) reasons[x.code] = (reasons[x.code] || 0) + 1; }
+    }
+    if (runId) await ctx.rpc('finish_run', { p_run: runId, p_status: 'success', p_seen: attempts, p_accepted: created, p_rejected: rejected, p_error: null }).catch(() => {});
+    const out = { ok: true, ...base, created, duplicates, rejected, reasons, warning };
+    await ctx.rpc('worker_set_status', { p_key: 'feed', p_status: { ok: true, last_import_at: ctx.now().toISOString(), seen, kept, created, duplicates, rejected, warning: warning || null } }).catch(() => {});
+    return out;
+  } catch (e) {
+    if (runId) await ctx.rpc('finish_run', { p_run: runId, p_status: 'error', p_seen: 0, p_accepted: created, p_rejected: rejected, p_error: clean(e && e.message) }).catch(() => {});
+    await ctx.rpc('worker_set_status', { p_key: 'feed', p_status: { ok: false, last_import_at: ctx.now().toISOString(), error: clean(e && e.message) } }).catch(() => {});
+    throw e;
+  }
+}
+// Importação automática: no máximo uma vez a cada `every_hours` (padrão 24), só se estiver ligada.
+export async function runFeedImport(ctx) {
+  const fc = (await ctx.rpc('worker_setting', { p_key: 'feed_config' }).catch(() => null)) || {}; if (fc.enabled !== true) return {};
+  const rt = await loadRuntime(ctx); const last = rt.status.feed && rt.status.feed.last_import_at ? new Date(rt.status.feed.last_import_at).getTime() : 0;
+  if (ctx.now().getTime() - last < Math.max(1, num(fc.every_hours, 24)) * 3600000) return {};
+  const r = await importShopeeFeed(ctx, rt, {}); return { feed: `${r.created} nova(s) de ${r.kept} candidatas` };
+}
+
+/* ================================================================== Coletor do navegador (extensão): recebe os produtos lidos nas páginas do afiliado */
+const BROWSER_HOSTS = { mercadolivre: /(^|\.)(mercadolivre\.com\.br|mercadolibre\.com|meli\.la)$/i, shopee: /(^|\.)(shopee\.com\.br|shope\.ee)$/i };
+const httpsHost = (u, re) => { try { const x = new URL(String(u)); return x.protocol === 'https:' && re.test(x.hostname) ? x.toString() : ''; } catch { return ''; } };
+export async function handleBrowserIngest(ctx, headers, body) {
+  const rt = await loadRuntime(ctx); const want = rt.secrets.ingest_token_hash; const got = String((headers && (headers['x-ingest-token'] || headers['X-Ingest-Token'])) || '');
+  if (!want || got.length < 20 || got.length > 200 || !safeEq(sha256Hex(got), want)) return { ok: false, status: 401 };
+  const cc = (await ctx.rpc('worker_setting', { p_key: 'collector_config' }).catch(() => null)) || {};
+  const conf = { min_discount: num(cc.min_discount, 25), min_price: num(cc.min_price, 0), max_price: num(cc.max_price, 100000), per_run: Math.max(1, Math.min(num(cc.per_run, 20), 60)), enabled: cc.enabled !== false };
+  if (!body || body.action === 'ping') return { ok: true, status: 200, config: conf };
+  const platform = String(body.platform || ''); if (!BROWSER_HOSTS[platform]) return { ok: false, status: 400, error: 'plataforma desconhecida' };
+  if (!conf.enabled) return { ok: true, status: 200, paused: true };
+  const s = (x, n) => String(x ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const items = (Array.isArray(body.items) ? body.items : []).slice(0, 80).map((x) => ({
+    external_id: /^[A-Za-z0-9._:-]{3,80}$/.test(String(x && x.id)) ? String(x.id) : '', title: s(x && x.title, 300), price: Number(x && x.price), previous: x && x.previous != null ? Number(x.previous) : null,
+    url: httpsHost(x && x.url, BROWSER_HOSTS[platform]), affiliate_url: httpsHost(x && x.affiliate_url, BROWSER_HOSTS[platform]), image: httpsHost(x && x.image, /./) || null,
+    commission_pct: Number.isFinite(Number(x && x.commission_pct)) && Number(x.commission_pct) > 0 && Number(x.commission_pct) <= 100 ? Number(x.commission_pct) : null,
+    rating: Number(x && x.rating) > 0 && Number(x.rating) <= 5 ? Number(x.rating) : null, sold: Number(x && x.sold) > 0 ? Math.round(Number(x.sold)) : null,
+    derived_previous: !!(x && x.derived_previous), seller: s(x && x.seller, 120) || null, stock: null, used: false })).filter((x) => x.external_id && x.title.length >= 5 && x.price > 0 && x.url && x.affiliate_url);
+  const sel = selectOffers(items, { min_discount_pct: conf.min_discount, min_price: conf.min_price, max_price: conf.max_price, sort_by: 'commission' }, conf.per_run);
+  const conn = connectorOf(rt, platform); let created = 0, duplicates = 0, rejected = 0; const reasons = {};
+  for (const it of sel.list) {
+    const res = await ingestStoreItem(ctx, rt, platform, conn.config || {}, it, { sourceName: 'Coletor do navegador', kind: 'feed', evidence: { origem: 'pagina do programa de afiliados', preco_anterior_derivado: it.derived_previous || undefined } });
+    if (res.status === 'created') created++; else if (res.status === 'duplicate') duplicates++; else { rejected++; for (const f of res.failures || []) reasons[f.code] = (reasons[f.code] || 0) + 1; }
+  }
+  const warning = conn.mode === 'disabled' ? `O conector de ${STORE_LABEL[platform]} está desativado: ative-o em Conectores (modo manual serve) para poder aprovar.` : undefined;
+  await ctx.rpc('worker_set_status', { p_key: 'collector', p_status: { ok: true, last_at: ctx.now().toISOString(), platform, received: items.length, created, duplicates, rejected, warning: warning || null } }).catch(() => {});
+  return { ok: true, status: 200, received: items.length, eligible: sel.eligible, created, duplicates, rejected, skipped: sel.skip, reasons, warning };
+}
+
 /* ================================================================== Automação, acompanhamento, comissões, alertas e limpeza */
 export async function runAutomation(ctx) {
   const out = {};
+  try { const a = await aiFill(ctx, { limit: 8 }); if (a && (a.done || a.failed || a.error)) out.ai = a; } catch (e) { out.ai = { error: clean(e && e.message) }; } // a legenda da IA fica pronta antes de o modo automático aprovar
   try { out.auto = await ctx.rpc('run_auto_approve', { p_limit: 10 }); } catch (e) { out.auto = { error: clean(e && e.message) }; }
   try { out.expired = await ctx.rpc('expire_offers', {}); } catch { /* segue */ }
   return out;

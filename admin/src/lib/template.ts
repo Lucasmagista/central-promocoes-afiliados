@@ -5,6 +5,7 @@ import { money } from './format';
 export const TEMPLATE_VARS: { name: string; help: string }[] = [
   { name: 'title', help: 'Nome curto do produto (até 70 caracteres, como nos canais de ofertas)' },
   { name: 'full_title', help: 'Título completo, como vem da loja' },
+  { name: 'ai_text', help: 'Linha de benefício escrita pela IA (some se a IA estiver desligada)' },
   { name: 'price', help: 'Preço atual (R$)' },
   { name: 'previous_line', help: 'Linha "Antes: R$ x (-y%)" — só existe com preço anterior confiável' },
   { name: 'coupon_line', help: 'Linha de cupom — só existe se confirmado' },
@@ -35,6 +36,8 @@ export interface RenderContext {
   disclosure: string;
   shortlinkBase: string;
   code?: string;
+  /** Só para a prévia: texto de exemplo da linha da IA. */
+  aiText?: string;
 }
 
 /** Réplica fiel da regra do banco: linha com variável vazia é descartada; aviso de afiliado é sempre garantido. */
@@ -53,7 +56,7 @@ export function renderTemplate(body: string, channel: Channel, ctx: RenderContex
     timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
   }).replace(',', ' às');
   const vars: Record<string, string> = {
-    title: shortTitle(o.title), full_title: o.title, price: money(o.current_price), previous_line: previousLine,
+    title: shortTitle(o.title), full_title: o.title, ai_text: ctx.aiText ?? '', price: money(o.current_price), previous_line: previousLine,
     coupon_line: o.coupon_code && o.coupon_confirmed ? `Cupom: ${o.coupon_code}` : '',
     observed_at: observed, url, disclosure: ctx.disclosure, category: o.category ?? '', seller: o.seller_name ?? '',
   };

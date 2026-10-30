@@ -13,6 +13,7 @@ services:
     env_file: worker/worker.env
     volumes:
       - ../db/migrations:/app/migrations:ro
+      - ./feeds:/feeds:ro   # CSVs do feed de produtos da Shopee (Configurações → Coleta)
     read_only: true
     tmpfs:
       - /tmp

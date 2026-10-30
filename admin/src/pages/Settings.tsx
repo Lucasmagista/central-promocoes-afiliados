@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Bot, Database, FileText, Gauge, PauseCircle, PlayCircle, Save, ShieldCheck, SlidersHorizontal, Smartphone, Workflow } from 'lucide-react';
+import { Bot, Database, FileText, Gauge, PauseCircle, PlayCircle, Radar, Save, ShieldCheck, SlidersHorizontal, Smartphone, Sparkles, Workflow } from 'lucide-react';
 import { api } from '../lib/api';
 import { useSession } from '../session';
 import type { SecretInfo, SettingsMap } from '../lib/types';
@@ -10,12 +10,16 @@ import WhatsAppTab from './settings/WhatsAppTab';
 import TelegramTab from './settings/TelegramTab';
 import WorkerTab from './settings/WorkerTab';
 import DatabaseTab from './settings/DatabaseTab';
+import AiTab from './settings/AiTab';
+import CollectTab from './settings/CollectTab';
 
-type Tab = 'operacao' | 'whatsapp' | 'telegram' | 'worker' | 'banco' | 'compliance' | 'avancado';
+type Tab = 'operacao' | 'whatsapp' | 'telegram' | 'ia' | 'coleta' | 'worker' | 'banco' | 'compliance' | 'avancado';
 const TABS: { v: Tab; label: string; icon: JSX.Element }[] = [
   { v: 'operacao', label: 'Operação', icon: <Gauge size={16} /> },
   { v: 'whatsapp', label: 'WhatsApp', icon: <Smartphone size={16} /> },
   { v: 'telegram', label: 'Telegram', icon: <Bot size={16} /> },
+  { v: 'ia', label: 'IA (OpenRouter)', icon: <Sparkles size={16} /> },
+  { v: 'coleta', label: 'Coleta de ofertas', icon: <Radar size={16} /> },
   { v: 'worker', label: 'Worker', icon: <Workflow size={16} /> },
   { v: 'banco', label: 'Banco de dados', icon: <Database size={16} /> },
   { v: 'compliance', label: 'Regras de publicação', icon: <FileText size={16} /> },
@@ -113,6 +117,8 @@ export default function SettingsPage() {
           {tab === 'operacao' && <fieldset disabled={!isAdmin} className="bare"><Operacao s={s} reload={reload} /></fieldset>}
           {tab === 'whatsapp' && <WhatsAppTab {...props} />}
           {tab === 'telegram' && <TelegramTab {...props} />}
+          {tab === 'ia' && <AiTab {...props} />}
+          {tab === 'coleta' && <CollectTab {...props} />}
           {tab === 'worker' && <WorkerTab {...props} />}
           {tab === 'banco' && <DatabaseTab isAdmin={isAdmin} s={s} />}
           {tab === 'compliance' && <fieldset disabled={!isAdmin} className="bare"><Compliance s={s} reload={reload} /></fieldset>}

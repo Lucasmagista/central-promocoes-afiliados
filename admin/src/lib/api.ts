@@ -2,7 +2,7 @@ import type {
   PromoSource, PromoSourceInput, CapturedLink, RoutingRule, RoutingRuleInput, WatchItem, CommissionSummary,
   Alert, Analytics, AuditEvent, AuditFilter, Connector, DashboardSummary, Destination, IngestInput, IngestResult,
   Offer, OfferDetail, OfferFilter, Profile, Publication, PublicationFilter, Role, Run, SettingsMap, Template,
-  Channel, ChannelOverview, SecretInfo, SecretKey, IntProvider, Chat, ChatDetail, ChatFilter, ChatMessage, ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion, GroupAction, GroupDefaults, DatabaseConfig, DatabaseOverview } from './types';
+  Channel, ChannelOverview, SecretInfo, KeyStatus, SecretKey, IntProvider, Chat, ChatDetail, ChatFilter, ChatMessage, ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion, GroupAction, GroupDefaults, DatabaseConfig, DatabaseOverview } from './types';
 
 export type SessionState =
   | { status: 'anonymous' }
@@ -56,6 +56,12 @@ export interface Api {
   cancelJob(id: string): Promise<void>;
 
   /** Integrações: configuração sem segredo (settings int_*), segredos só de escrita e ações executadas pelo worker. */
+  getAiKeyStatus(): Promise<KeyStatus>;
+  setAiKey(value: string): Promise<void>;
+  clearAiKey(): Promise<void>;
+  getIngestTokenStatus(): Promise<KeyStatus>;
+  /** Gera um novo token do coletor do navegador. O valor só é devolvido aqui, uma vez. */
+  rotateIngestToken(): Promise<string>;
   listIntegrationSecrets(): Promise<SecretInfo[]>;
   setIntegrationSecret(key: SecretKey, value: string): Promise<void>;
   clearIntegrationSecret(key: SecretKey): Promise<void>;

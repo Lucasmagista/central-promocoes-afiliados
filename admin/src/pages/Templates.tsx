@@ -50,7 +50,7 @@ function Editor({ t, disabled, onSaved }: { t: Template; disabled: boolean; onSa
   const s = settings.data ?? {};
   const sample = useMemo(() => { const x = SCEN.find((c) => c.v === scen)!.make(BASE); const p = Number(price); return p > 0 ? { ...x, current_price: p, discount_pct: x.previous_price ? +(((x.previous_price - p) / x.previous_price) * 100).toFixed(2) : null } : x; }, [scen, price]);
   let preview = ''; let err: string | null = null;
-  try { preview = renderTemplate(body, t.channel, { offer: sample, disclosure: String(s.affiliate_disclosure ?? ''), shortlinkBase: String(s.shortlink_base ?? ''), code: 'k7Fq2xPa' }); } catch (e) { err = String(e); }
+  try { preview = renderTemplate(body, t.channel, { offer: sample, disclosure: String(s.affiliate_disclosure ?? ''), shortlinkBase: String(s.shortlink_base ?? ''), code: 'k7Fq2xPa', aiText: 'Bateria para o dia todo ✨' }); } catch (e) { err = String(e); }
   const used = [...new Set([...body.matchAll(/\{\{([a-z_]+)\}\}/g)].map((m) => m[1]))];
   const unknown = used.filter((v) => !TEMPLATE_VARS.some((x) => x.name === v));
   const dirty = body !== t.body;

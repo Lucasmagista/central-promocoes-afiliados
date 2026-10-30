@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: light dark; --bd: #8884; --ac: #f5b800; }
+  body { font: 13px/1.4 system-ui, sans-serif; width: 340px; margin: 0; padding: 14px; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label { display: grid; gap: 3px; margin-bottom: 9px; font-weight: 600; font-size: 12px; }
+  input[type=text], input[type=password], input[type=number] { font: inherit; padding: 6px 8px; border: 1px solid var(--bd); border-radius: 6px; background: transparent; color: inherit; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 9px; } .row > label { margin: 0; flex: 1; }
+  .chk { display: flex; gap: 6px; align-items: center; font-weight: 400; }
+  button { font: inherit; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--bd); background: transparent; color: inherit; cursor: pointer; }
+  button.p { background: var(--ac); color: #111; border-color: var(--ac); font-weight: 700; } button:disabled { opacity: .5; cursor: default; }
+  #msg { margin-top: 10px; font-size: 12px; white-space: pre-wrap; } .err { color: #d33; } .ok { color: #2a8a4a; } small { opacity: .7; }
+</style></head><body>
+<h1>Central de Promoções — Coletor</h1>
+<label>Endereço do worker<input id="workerUrl" type="text" placeholder="https://worker.seudominio.com.br" autocomplete="off"></label>
+<label>Token<input id="token" type="password" placeholder="ing_…" autocomplete="off"></label>
+<div class="row"><label>Coletar a cada (min)<input id="everyMin" type="number" min="15" step="15"></label><label>Itens por página<input id="perSource" type="number" min="1" max="40"></label></div>
+<div class="row"><label class="chk"><input id="mercadolivre" type="checkbox"> Mercado Livre</label><label class="chk"><input id="shopee" type="checkbox"> Shopee</label></div>
+<div class="row"><button id="save" class="p">Salvar</button><button id="now">Coletar agora</button></div>
+<small>Entre nas suas contas do Mercado Livre e do portal de afiliados da Shopee neste Chrome. O Chrome precisa estar aberto.</small>
+<div id="msg"></div>
+<script src="popup.js"></script></body></html>

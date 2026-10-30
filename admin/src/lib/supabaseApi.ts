@@ -3,7 +3,7 @@ import type { Api, SessionState } from './api';
 import type {
   Analytics, AuditEvent, Connector, DashboardSummary, Destination, IngestInput, IngestResult, Offer, OfferDetail,
   PriceObservation, Profile, Publication, Role, Run, SettingsMap, Template,
-  SecretInfo, Channel, ChannelOverview, Chat, ChatDetail, ChatFilter, ChatMessage, OutboxItem, Participant,
+  SecretInfo, KeyStatus, Channel, ChannelOverview, Chat, ChatDetail, ChatFilter, ChatMessage, OutboxItem, Participant,
   ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion,
   PromoSource, CapturedLink, RoutingRule, WatchItem, CommissionSummary,
 } from './types';
@@ -164,6 +164,11 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     },
     async cancelJob(id) { await rpc('cancel_channel_job', { p_id: id }); },
 
+    async getAiKeyStatus() { return (await rpc<KeyStatus>('ai_key_status')) ?? { is_set: false }; },
+    async setAiKey(value) { await rpc('set_ai_key', { p_value: value }); },
+    async clearAiKey() { await rpc('clear_ai_key'); },
+    async getIngestTokenStatus() { return (await rpc<KeyStatus>('ingest_token_status')) ?? { is_set: false }; },
+    async rotateIngestToken() { return String(await rpc<string>('rotate_ingest_token')); },
     async listIntegrationSecrets() { return (await rpc<SecretInfo[]>('list_integration_secrets')) ?? []; },
     async setIntegrationSecret(key, value) { await rpc('set_integration_secret', { p_key: key, p_value: value }); },
     async clearIntegrationSecret(key) { await rpc('clear_integration_secret', { p_key: key }); },

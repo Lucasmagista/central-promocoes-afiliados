@@ -1,0 +1,1 @@
+Coloque aqui os CSVs do feed de produtos da Shopee (Criativo > Feed de produto).

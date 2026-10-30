@@ -314,7 +314,10 @@ export interface CollectResult {
 }
 
 /* ---------- Integrações (008) ---------- */
-export type IntProvider = 'evolution' | 'telegram' | 'worker' | 'mercadolivre' | 'shopee' | 'amazon' | 'aliexpress' | 'magalu';
+export type IntProvider = 'evolution' | 'telegram' | 'worker' | 'mercadolivre' | 'shopee' | 'amazon' | 'aliexpress' | 'magalu' | 'ai' | 'collector';
+
+/** Estado de uma chave/token guardado só como escrita: o valor nunca volta, só uma dica dos últimos caracteres. */
+export interface KeyStatus { is_set: boolean; hint?: string | null; updated_at?: string | null }
 export type SecretKey = 'evolution_api_key' | 'telegram_bot_token' | 'telegram_webhook_secret' | 'ml_client_secret' | 'shopee_secret' | 'amazon_client_secret' | 'aliexpress_app_secret' | 'supabase_management_token';
 /** O painel nunca recebe o valor de um segredo: só se existe e os 4 últimos caracteres. */
 export interface SecretInfo { key: SecretKey; is_set: boolean; hint: string | null; updated_at: string | null }

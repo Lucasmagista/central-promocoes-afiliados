@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Central de Promoções — Coletor",
+  "version": "1.0.0",
+  "description": "Lê as páginas do seu programa de afiliados (Mercado Livre e Shopee), gera os links de afiliado e envia os produtos para a fila de aprovação da Central.",
+  "permissions": ["storage", "alarms", "tabs"],
+  "host_permissions": ["https://www.mercadolivre.com.br/*", "https://affiliate.shopee.com.br/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Central de Promoções", "default_popup": "popup.html" },
+  "content_scripts": [
+    { "matches": ["https://www.mercadolivre.com.br/afiliados/*", "https://affiliate.shopee.com.br/*"], "js": ["hook-main.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://www.mercadolivre.com.br/afiliados/*"], "js": ["common.js", "content-ml.js"], "run_at": "document_idle" },
+    { "matches": ["https://affiliate.shopee.com.br/*"], "js": ["common.js", "content-shopee.js"], "run_at": "document_idle" }
+  ]
+}

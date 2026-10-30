@@ -247,7 +247,11 @@ export function createDemoApi(): Api {
       { title: 'Mouse gamer sem fio', price: 89, previous: 129, discount_pct: 31, url: 'https://shopee.com.br/product/9/57', image: null, seller: 'Gamer Hub', commission_pct: 8 },
     ],
   };
+  const demoKeys = new Map<string, { hint: string; at: string }>();
   const demoIntegration = (provider: IntProvider, action: string, p: Record<string, unknown>): Record<string, unknown> => {
+    if (provider === 'ai' && action === 'test') { if (!demoKeys.has('ai')) ERR('Cole a chave do OpenRouter e clique em Guardar chave.'); return { headline: '🎧 ' + (String(p.title ?? '').slice(0, 60) || 'Fone Bluetooth TWS com cancelamento de ruído'), body: 'Estojo de carga e bateria para o dia todo', model: String((s.settings.ai_config as any)?.model ?? 'openai/gpt-4o-mini'), ms: 1380 }; }
+    if (provider === 'shopee' && action === 'import_feed') { const fc = (s.settings.feed_config ?? {}) as any; if (!(fc.sources ?? []).length) ERR('Cadastre ao menos uma fonte do feed em Configurações → Coleta.'); return p.dry ? { ok: true, dry: true, seen: 110000, kept: 10456, sources: 2, items: [{ title: 'Kit 4 Descansos de Silicone para Talheres', price: 19.99, previous: 39.99, off: 50, rating: 4.9 }, { title: 'Óleo Essencial de Lavanda 100% Puro 30 ml', price: 11.9, previous: 49.9, off: 76, rating: 5 }] } : { ok: true, seen: 110000, kept: 10456, created: 30, duplicates: 4, rejected: 1 }; }
+    if (provider === 'collector' && action === 'status') return {};
     const evo = s.settings.int_evolution as Record<string, unknown>, tg = s.settings.int_telegram as Record<string, unknown>;
     const report = (k: IntProvider, v: Record<string, unknown>) => { s.settings[`int_status_${k}`] = { ...v, checked_at: iso(0) }; };
     if (provider === 'evolution') {
@@ -744,6 +748,11 @@ export function createDemoApi(): Api {
     },
 
     /* ---- Integrações (simuladas: nenhum servidor real é contatado) ---- */
+    async getAiKeyStatus() { const v = demoKeys.get('ai'); return wait({ is_set: !!v, hint: v?.hint ?? null, updated_at: v?.at ?? null }, 60); },
+    async setAiKey(value) { needAdmin(); const v = value.trim(); if (!/^[A-Za-z0-9_.-]{20,200}$/.test(v)) ERR('Chave inválida (de 20 a 200 caracteres, sem espaços)'); demoKeys.set('ai', { hint: v.slice(-4), at: iso(0) }); audit('integration_secret_set', 'integration', 'openrouter_api_key'); await wait(null, 100); },
+    async clearAiKey() { needAdmin(); demoKeys.delete('ai'); audit('integration_secret_cleared', 'integration', 'openrouter_api_key'); await wait(null, 80); },
+    async getIngestTokenStatus() { const v = demoKeys.get('ingest'); return wait({ is_set: !!v, hint: v?.hint ?? null, updated_at: v?.at ?? null }, 60); },
+    async rotateIngestToken() { needAdmin(); const t = 'ing_' + (uid() + uid()).replace(/-/g, ''); demoKeys.set('ingest', { hint: t.slice(-4), at: iso(0) }); audit('integration_secret_set', 'integration', 'ingest_token'); return wait(t, 100); },
     async listIntegrationSecrets() {
       const keys: SecretKey[] = ['evolution_api_key', 'telegram_bot_token', 'telegram_webhook_secret', 'ml_client_secret', 'shopee_secret', 'amazon_client_secret', 'aliexpress_app_secret', 'supabase_management_token'];
       return wait(keys.map((key): SecretInfo => { const v = secrets.get(key); return { key, is_set: !!v, hint: v?.hint ?? null, updated_at: v?.at ?? null }; }), 80);

@@ -68,11 +68,25 @@ const limit = (key, max, windowMs) => {
   return { ok: e.n <= max, n: e.n, retryAfter: Math.max(1, Math.ceil((e.t0 + windowMs - now) / 1000)) };
 };
 
+const FEED_DIR = process.env.FEED_DIR || '/feeds';
 const ctx = {
   http: httpCall, now: () => new Date(), rand: Math.random, log: () => {}, sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   sha256hex: async (t) => crypto.createHash('sha256').update(t).digest('hex'),
   env: { has_url: true, has_key: true, supabase_host: hostOf(SB), key_role: keyRole() },
   managed: MANAGED, limits: SEG, limit, hasStore: true,
+  // Feed da Shopee: arquivo na pasta do servidor (FEED_DIR) ou endereço https (segue no máximo 3 redirecionamentos, sempre checando o destino)
+  openFeed: async (src) => {
+    if (src.kind === 'file') return fs.createReadStream(path.join(FEED_DIR, path.basename(String(src.value))));
+    let u = String(src.value);
+    for (let hop = 0; hop < 4; hop++) {
+      assertOut(u); if (!/^https:/i.test(u)) throw new Error('O endereço do feed precisa ser https');
+      const r = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(300000) });
+      if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { u = new URL(r.headers.get('location'), u).toString(); continue; }
+      if (!r.ok || !r.body) throw new Error('O feed respondeu HTTP ' + r.status);
+      return r.body;
+    }
+    throw new Error('Redirecionamentos demais ao abrir o feed');
+  },
   rpc: async (name, args) => {
     const r = await httpCall({ method: 'POST', url: `${SB}/rest/v1/rpc/${name}`, headers: { apikey: KEY, Authorization: `Bearer ${KEY}` }, json: args || {}, timeoutMs: 30000 });
     if (r.status >= 300) throw new Error(`Supabase ${name} respondeu ${r.status}: ${String((r.data && (r.data.message || JSON.stringify(r.data))) || '').slice(0, 200)}`);
@@ -115,6 +129,7 @@ const timers = [
     stats.coleta++; stats.last.coleta = new Date().toISOString();
     if (Object.keys(c).length || w.offers || m.synced || h) log('[coleta]', JSON.stringify({ coleta: c, acompanhados: w, comissoes: m, limpeza: h }));
   }),
+  every('feed', 600000, async () => { const r = await W.runFeedImport(ctx); if (r && r.feed) log('[feed]', r.feed); }),
   every('radar', 15000, async () => {
     const r = await W.runRadar(ctx, { max: 10 }); stats.radar++; stats.last.radar = new Date().toISOString();
     if (r.messages) { stats.radar_messages += r.messages; stats.radar_offers += r.created || 0; log('[radar]', JSON.stringify(r)); }
@@ -162,6 +177,19 @@ const server = http.createServer(async (req, res) => {
   }
   const mShort = (req.method === 'GET' || req.method === 'HEAD') && (/^\/r\/([A-Za-z0-9_-]{4,32})$/.exec(path) || /^\/([a-f0-9]{8})$/.exec(path));
   if (mShort) return redirectShort(req, res, mShort[1], xff);
+  if (path === '/ingest/browser') {
+    // Coletor do navegador (extensão): produtos lidos nas páginas do programa de afiliados. Exige o token gerado no painel.
+    if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, x-ingest-token', 'access-control-allow-methods': 'POST, OPTIONS' }); return res.end(); }
+    if (req.method !== 'POST') return reply(res, 404, { ok: false });
+    const ip = xff.split(',')[0].trim() || req.socket.remoteAddress || '';
+    if (!limit('ingest:' + ip, 20, 60000).ok) return reply(res, 429, { ok: false });
+    try {
+      const raw = await readBody(req, 1024 * 1024); let body; try { body = JSON.parse(raw); } catch { return reply(res, 400, { ok: false }); }
+      const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k.toLowerCase(), String(v)]));
+      const r = await W.handleBrowserIngest(ctx, headers, body); const { status, ...rest } = r;
+      res.setHeader && res.setHeader('access-control-allow-origin', '*'); return reply(res, status || 200, rest, { 'access-control-allow-origin': '*' });
+    } catch (e) { if (e && e.status === 413) return reply(res, 413, { ok: false }); log('[ingest] erro:', String((e && e.message) || e).slice(0, 200)); return reply(res, 500, { ok: false }); }
+  }
   const kind = ROUTES[path];
   if (req.method !== 'POST' || !kind) return reply(res, 404, { ok: false });
   try {

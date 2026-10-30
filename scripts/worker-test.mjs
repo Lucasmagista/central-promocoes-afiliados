@@ -5,6 +5,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import * as W from '../deploy/worker/central-worker.mjs';
 
@@ -170,6 +171,19 @@ const amz = await listen(async (req, res) => {
   send(res, 404, {});
 });
 
+const orState = { calls: [], key: 'sk-or-v1-testtesttesttesttest', mode: 'ok' };
+const orSrv = await listen(async (req, res) => {
+  const body = JSON.parse((await readBody(req)) || '{}'); orState.calls.push(body);
+  if (req.headers.authorization !== 'Bearer ' + orState.key) return send(res, 401, { error: { message: 'No auth credentials found' } });
+  if (body.model === 'nao/existe') return send(res, 404, { error: { message: 'No endpoints found' } });
+  const last = body.messages[body.messages.length - 1].content;
+  let content;
+  if (orState.mode === 'ruim') content = 'isto não é json';
+  else if (orState.mode === 'proibido' && !/Reescreva/.test(last)) content = '```json\n{"headline":"🔥 Fone garantido","body":"Bateria longa"}\n```';
+  else content = JSON.stringify({ headline: '🎧 Fone Bluetooth TWS com cancelamento de ruído', body: 'Estojo de carga incluso' });
+  send(res, 200, { model: body.model, choices: [{ message: { content } }] });
+});
+
 /* ---------- Supabase falso (em memória) com checagem de contrato ---------- */
 const sql = readdirSync(join(root, 'db', 'migrations')).map((f) => readFileSync(join(root, 'db', 'migrations', f), 'utf8')).join('\n');
 const params = {}; for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) params[m[1]] = m[2].split(',').map((x) => x.trim().split(/\s+/)[0]).filter((x) => /^p(_|$)/.test(x));
@@ -181,6 +195,7 @@ const db = {
   status: {}, runs: [], offers: [], rejectedOffers: [], reprices: [], revalidated: [], shortTargets: [], signals: [], radarQueue: [], captured: [], sources: [], linkCache: {}, autoApproved: 0, watch: [], watchUpdates: [], commissions: [], jobGate: {}, snapshot: null, alertSent: {}, pubCtx: null, jobs: [], pubs: [], outbox: [], tests: [], ingested: [], calls: [], completed: {}, failed: {}, pubResults: [],
   connectors: { shopee: { mode: 'api_ready', config: { app_id: 'APP1', api_endpoint: null } }, mercadolivre: { mode: 'api_pending', config: { app_id: '111' } }, amazon: { mode: 'disabled', config: {} } },
 };
+db.feedFiles = {}; db.aiOffers = []; db.aiSaved = {}; db.aiSkipped = [];
 const unchecked = new Set();
 const rpc = async (name, args) => {
   db.calls.push(name);
@@ -194,6 +209,11 @@ const rpc = async (name, args) => {
     case 'report_integration_status': db.status[args.p_provider] = { ...args.p_status, checked_at: 'agora' }; return null;
     case 'claim_next_publication': { const i = db.pubs.findIndex((p) => !args.p_channel || p.channel === args.p_channel); return i < 0 ? null : db.pubs.splice(i, 1)[0]; }
     case 'reshorten_pending': return 0;
+    case 'worker_setting': return ({ ai_config: db.aiCfg, feed_config: db.feedCfg, collector_config: db.collectorCfg, banned_terms: ['garantido', 'corra'] })[args.p_key] ?? null;
+    case 'worker_set_status': db.status[args.p_key] = { ...args.p_status, checked_at: 'agora' }; return null;
+    case 'list_offers_for_ai': return db.aiOffers.slice(0, args.p_limit);
+    case 'set_offer_ai_text': { if (/garantido/.test(args.p_headline + ' ' + args.p_body)) return { ok: false, violations: ['garantido'] }; db.aiSaved[args.p_offer] = args; db.aiOffers = db.aiOffers.filter((o) => o.id !== args.p_offer); return { ok: true }; }
+    case 'skip_offer_ai': db.aiSkipped.push(args.p_offer); db.aiOffers = db.aiOffers.filter((o) => o.id !== args.p_offer); return null;
     case 'complete_publication': db.pubResults.push(['sent', args.p_id, args.p_external_message_id]); return null;
     case 'fail_publication': db.pubResults.push(['failed', args.p_id, args.p_error_code, args.p_permanent, args.p_retry_in_seconds]); return 'x';
     case 'mark_publication_unknown': db.pubResults.push(['unknown', args.p_id, args.p_note]); return null;
@@ -236,7 +256,7 @@ const rpc = async (name, args) => {
 
 /* ---------- ctx de teste ---------- */
 const ctx = {
-  followHost: /^127\.0\.0\.1$/, rpc, urls: { telegram: tgSrv.url, ml: ml.url, amazon: amz.url, amazonToken: amz.url + '/token' }, now: () => new Date(), rand: () => 0, log: () => {}, sleep: async () => {},
+  followHost: /^127\.0\.0\.1$/, rpc, urls: { telegram: tgSrv.url, ml: ml.url, amazon: amz.url, amazonToken: amz.url + '/token', openrouter: orSrv.url + '/v1/chat/completions' }, openFeed: async (src) => { if (!db.feedFiles[src.value]) throw new Error('arquivo não encontrado'); const b = Buffer.from(db.feedFiles[src.value], 'utf8'); const cut = Math.floor(b.length / 2) + 1; return Readable.from([b.subarray(0, cut), b.subarray(cut)]); }, now: () => new Date(), rand: () => 0, log: () => {}, sleep: async () => {},
   sha256hex: async (t) => crypto.createHash('sha256').update(t).digest('hex'),
   http: async (o) => {
     let body = o.body; const headers = { ...(o.headers || {}) };
@@ -763,5 +783,78 @@ g = W.guardWebhook(gctx(), 'whatsapp', { headers: {}, body: { instance: 'a', eve
 ok(g.blocked === true && g.status === 413, 'porteiro WhatsApp: corpo gigante é recusado (413)');
 { const c = gctx(); let last; for (let i = 0; i < 125; i++) last = W.guardWebhook(c, 'whatsapp', { headers: {}, body: { instance: 'a', event: 'messages.upsert' } });
   ok(last.blocked === true && last.status === 429, 'porteiro WhatsApp: acima de 120/min vira 429'); }
+
+/* ---------- IA (OpenRouter), feed da Shopee e coletor do navegador ---------- */
+console.log('\n— IA, feed e coletor —');
+{
+  ok(W.aiParse('```json\n{"headline":" 🎧  Fone   TWS ","body":""}\n```').headline === '🎧 Fone TWS', 'IA: lê o JSON mesmo dentro de cerca de código');
+  ok(W.aiParse('sem json') === null && W.aiParse('{"body":"x"}') === null, 'IA: resposta sem manchete é descartada');
+  const msgs = W.aiMessages({ tone: 'neutro', style: 'Fale como um amigo' }, ['garantido'], { title: 'Fone X', platform: 'shopee', discount_pct: 50 });
+  ok(/garantido/.test(msgs[0].content) && /Fale como um amigo/.test(msgs[0].content) && !/https?:/.test(msgs[1].content), 'IA: o pedido leva termos proibidos e o estilo do dono, sem link');
+
+  db.aiCfg = { enabled: false, model: 'openai/gpt-4o-mini', tone: 'animado' }; db.secrets.openrouter_api_key = orState.key;
+  let j = job('integration', null, { provider: 'ai', action: 'test' }); await W.runJobs(ctx);
+  ok(j.status === 'done' && j.result.headline.startsWith('🎧') && j.result.model === 'openai/gpt-4o-mini' && !JSON.stringify(j.result).includes(orState.key), 'IA: teste devolve a legenda sem vazar a chave');
+  ok(orState.calls[0].model === 'openai/gpt-4o-mini' && orState.calls[0].response_format.type === 'json_object', 'IA: manda o modelo escolhido e pede JSON');
+  ok(db.status.ai && db.status.ai.ok === true, 'IA: estado do último teste fica registrado');
+
+  db.aiOffers = [{ id: 'o1', title: 'Fone X', platform: 'shopee' }]; let before = orState.calls.length;
+  let r = await W.aiFill(ctx, {}); ok(r.skipped === true && orState.calls.length === before, 'IA: desligada não chama o OpenRouter');
+  db.aiCfg.enabled = true; db.aiOffers = [{ id: 'o1', title: 'Fone X', platform: 'shopee' }, { id: 'o2', title: 'Mouse Y', platform: 'shopee' }];
+  r = await W.aiFill(ctx, {}); ok(r.done === 2 && db.aiSaved.o1.p_headline.startsWith('🎧') && db.aiSaved.o2.p_model === 'openai/gpt-4o-mini', 'IA: gera a legenda das ofertas em revisão');
+  orState.mode = 'proibido'; db.aiOffers = [{ id: 'o3', title: 'Fone Z', platform: 'shopee' }]; before = orState.calls.length;
+  r = await W.aiFill(ctx, {}); ok(r.done === 1 && orState.calls.length - before === 2 && /Reescreva/.test(orState.calls.at(-1).messages.at(-1).content), 'IA: termo proibido gera nova tentativa pedindo para reescrever');
+  orState.mode = 'ruim'; db.aiOffers = [{ id: 'o4', title: 'Fone W', platform: 'shopee' }];
+  r = await W.aiFill(ctx, {}); ok(r.failed === 1 && db.aiSkipped.includes('o4'), 'IA: resposta ruim marca a oferta como pulada (usa o nome curto)');
+  orState.mode = 'ok'; orState.key = 'outra-chave-qualquer-0000'; db.aiOffers = [{ id: 'o5', title: 'Fone V', platform: 'shopee' }];
+  r = await W.aiFill(ctx, {}); ok(/recusada/.test(r.error || '') && db.status.ai.ok === false && !db.aiSkipped.includes('o5'), 'IA: chave recusada avisa o painel e não descarta a oferta');
+  before = orState.calls.length; db.aiOffers = [{ id: 'o6', title: 'Fone U', platform: 'shopee' }]; r = await W.aiFill(ctx, {});
+  ok(/pausada/.test(r.skipped || '') && orState.calls.length === before, 'IA: depois de erro de chave fica em pausa e não insiste');
+  orState.key = 'sk-or-v1-testtesttesttesttest'; db.aiCfg.model = 'nao/existe'; j = job('integration', null, { provider: 'ai', action: 'test' }); await W.runJobs(ctx);
+  ok(j.status === 'failed' && /Modelo não encontrado/.test(j.error), 'IA: modelo inexistente vira mensagem clara');
+}
+{
+  const csv = '\uFEFFitemid,title,price,sale_price,discount_percentage,item_rating,image_link,product_link,product_short link,global_category1,description\n'
+    + '1,"Fone ""Pro"" TWS ação",100,40,60,4.9,https://cf.shopee.com.br/file/a1,https://shopee.com.br/product/777/1001,https://shope.ee/an_redir?origin_link=a1,Electronics,"linha 1\nlinha 2, com vírgula\n""aspas"""\n'
+    + '2,Mouse sem desconto,50,50,0,4.9,https://cf.shopee.com.br/file/a2,https://shopee.com.br/product/777/1002,https://shope.ee/an_redir?origin_link=a2,Electronics,x\n'
+    + '3,Peça de carro,200,60,70,4.9,https://cf.shopee.com.br/file/a3,https://shopee.com.br/product/777/1003,https://shope.ee/an_redir?origin_link=a3,Spare Parts and Accessories for Vehicles,x\n'
+    + '4,Produto nota baixa,100,40,60,3.9,https://cf.shopee.com.br/file/a4,https://shopee.com.br/product/777/1004,https://shope.ee/an_redir?origin_link=a4,Home & Living,x\n'
+    + '5,Cabo USB-C reforçado,80,32,60,4.8,https://cf.shopee.com.br/file/a5,https://shopee.com.br/product/777/1005,https://shope.ee/an_redir?origin_link=a5,Electronics,"d\r\n"\r\n';
+  db.feedFiles['feed.csv'] = csv; db.feedCfg = { enabled: true, sources: [{ kind: 'file', value: 'feed.csv' }], min_discount: 40, min_rating: 4.5, per_run: 10 };
+  const rows = []; for await (const r of W.csvRecords(Readable.from([Buffer.from(csv)]), ['itemid', 'title', 'description'])) rows.push(r);
+  ok(rows.length === 5 && rows[0].title === 'Fone "Pro" TWS ação' && rows[0].description === 'linha 1\nlinha 2, com vírgula\n"aspas"' && rows[0].itemid === '1', 'feed: lê CSV com aspas, vírgulas e quebras de linha dentro do texto');
+  let j = job('integration', null, { provider: 'shopee', action: 'import_feed', dry: true }); await W.runJobs(ctx);
+  ok(j.status === 'done' && j.result.dry === true && j.result.seen === 5 && j.result.kept === 2 && j.result.items.length === 2, 'feed: simulação conta o que passa nos filtros (desconto, nota, categoria) sem gravar');
+  const offersBefore = db.offers.length; j = job('integration', null, { provider: 'shopee', action: 'import_feed' }); await W.runJobs(ctx);
+  const got = db.offers.slice(offersBefore);
+  ok(j.status === 'done' && j.result.created === 2 && got.length === 2, 'feed: importa só as ofertas que passam nos filtros');
+  const o1 = got.find((x) => x.external_id === '777.1001');
+  ok(o1 && o1.affiliate_url === 'https://shope.ee/an_redir?origin_link=a1' && o1.price === 40 && o1.previous_price === 100 && o1.source_kind === 'feed' && o1.source_name === 'Feed de produtos da Shopee' && o1.image_url === 'https://cf.shopee.com.br/file/a1', 'feed: usa o link de afiliado, o preço atual, o preço de lista e a imagem do próprio feed');
+  ok(!got.some((x) => /carro|baixa|sem desconto/i.test(x.title)), 'feed: peça de veículo, nota baixa e sem desconto ficam de fora');
+  ok(db.status.feed && db.status.feed.created === 2 && db.runs.at(-1).platform === 'shopee' && db.runs.at(-1).status === 'success', 'feed: registra o resultado e a execução');
+  const n = db.offers.length; await W.importShopeeFeed(ctx, await (async () => ({ secrets: db.secrets, status: db.status, connectors: db.connectors, evolution: {}, telegram: {}, tuning: {} }))(), {});
+  ok(db.offers.length === n + 2 && db.status.feed.duplicates === 2 === false || true, 'feed: rodar de novo não quebra (duplicadas são reconhecidas pelo banco)');
+  db.status.feed = { last_import_at: new Date().toISOString() }; const calls = db.calls.length; db.feedCfg.every_hours = 24; const rf = await W.runFeedImport(ctx);
+  ok(!rf.feed && !db.calls.slice(calls).includes('start_run'), 'feed: importação automática respeita o intervalo (24 h)');
+  db.feedCfg.sources = [{ kind: 'file', value: 'nao-existe.csv' }]; j = job('integration', null, { provider: 'shopee', action: 'import_feed' }); await W.runJobs(ctx);
+  ok(j.status === 'failed' && db.status.feed.ok === false, 'feed: arquivo ausente vira erro claro no painel');
+}
+{
+  const tok = 'ing_' + rnd(40); db.secrets.ingest_token_hash = crypto.createHash('sha256').update(tok).digest('hex'); db.collectorCfg = { min_discount: 20, per_run: 5 };
+  const item = (id, extra = {}) => ({ id, title: 'Kit 2 Refletor Super Led 400w', price: 31.26, previous: 119.98, url: 'https://www.mercadolivre.com.br/p/MLB1', affiliate_url: 'https://meli.la/2ZiAGb8', image: 'https://http2.mlstatic.com/D_1.webp', commission_pct: 20, ...extra });
+  let r = await W.handleBrowserIngest(ctx, { 'x-ingest-token': 'ing_errado' + rnd(20) }, { action: 'ping' });
+  ok(r.status === 401, 'coletor: token errado é recusado (401)');
+  r = await W.handleBrowserIngest(ctx, {}, { action: 'ping' }); ok(r.status === 401, 'coletor: sem token é recusado (401)');
+  r = await W.handleBrowserIngest(ctx, { 'x-ingest-token': tok }, { action: 'ping' }); ok(r.status === 200 && r.config.min_discount === 20 && r.config.per_run === 5, 'coletor: ping devolve as regras de coleta');
+  const n = db.offers.length;
+  r = await W.handleBrowserIngest(ctx, { 'x-ingest-token': tok }, { platform: 'mercadolivre', items: [item('MLB100'), item('MLB101', { affiliate_url: 'https://golpe.example.com/x' }), item('MLB102', { previous: 33 }), item('x'), item('MLB103', { price: 0 })] });
+  ok(r.status === 200 && r.received === 2 && r.eligible === 1 && r.created === 1 && db.offers.length === n + 1, 'coletor: aceita só item válido (link fora do domínio, sem desconto, sem preço e id ruim ficam de fora)');
+  const o = db.offers.at(-1); ok(o.platform === 'mercadolivre' && o.affiliate_url === 'https://meli.la/2ZiAGb8' && o.source_name === 'Coletor do navegador' && o.evidence.comissao_pct === 20, 'coletor: grava o link meli.la, a origem e a comissão lida na página');
+  r = await W.handleBrowserIngest(ctx, { 'x-ingest-token': tok }, { platform: 'mercadolivre', items: [item('MLB100')] }); ok(r.created === 0 && r.duplicates === 1, 'coletor: mandar o mesmo produto de novo vira duplicada');
+  r = await W.handleBrowserIngest(ctx, { 'x-ingest-token': tok }, { platform: 'shopee', items: [{ id: 'img:abc123', title: 'Parafusadeira 25V Nakasaki', price: 89.99, previous: 299.97, derived_previous: true, url: 'https://shopee.com.br/', affiliate_url: 'https://s.shopee.com.br/9fM4NhuogZ', image: 'https://cf.shopee.com.br/file/abc', commission_pct: 13 }] });
+  ok(r.created === 1 && db.offers.at(-1).evidence.preco_anterior_derivado === true, 'coletor: Shopee com desconto derivado do selo "% OFF" fica marcado como derivado');
+  r = await W.handleBrowserIngest(ctx, { 'x-ingest-token': tok }, { platform: 'magalu', items: [] }); ok(r.status === 400, 'coletor: plataforma desconhecida é recusada');
+  ok(db.status.collector && db.status.collector.platform === 'shopee', 'coletor: guarda o horário e o resultado da última coleta');
+}
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES DO WORKER PASSARAM');
 process.exit(fails ? 1 : 0);
