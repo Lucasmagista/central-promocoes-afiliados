@@ -108,7 +108,7 @@ function Account({ platform, acc }: { platform: string; acc: StoreAccount }) {
     return <div className="acct"><div className="avatar-ml" aria-hidden>{(acc.nickname ?? '?').slice(0, 1)}</div><div style={{ minWidth: 0 }}>
       <div style={{ fontWeight: 650 }}>{acc.nickname ?? `Conta ${acc.id}`}</div>
       <div className="small muted">{[acc.power_seller ? POWER[acc.power_seller] ?? acc.power_seller : null, acc.level ? LEVEL[acc.level] ?? acc.level : null, `ID ${acc.id}`].filter(Boolean).join(' · ')}</div></div>
-      {acc.permalink && <a className="right small" href={acc.permalink} target="_blank" rel="noreferrer noopener">Perfil <ArrowUpRight size={12} style={{ verticalAlign: -1 }} /></a>}</div>;
+      <a className="right small" href="https://www.mercadolivre.com.br/afiliados/hub" target="_blank" rel="noreferrer noopener" title="Painel de afiliados do Mercado Livre: cliques, pedidos e ganhos">Painel de afiliados <ArrowUpRight size={12} style={{ verticalAlign: -1 }} /></a></div>;
   }
   return <div className="acct"><div className="avatar-ml" aria-hidden><KeyRound size={16} /></div><div style={{ minWidth: 0 }}>
     <div style={{ fontWeight: 650 }}>App {acc.id}</div>

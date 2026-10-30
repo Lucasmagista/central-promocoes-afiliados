@@ -32,6 +32,7 @@ do $$
 declare d text; old constant text := $a$if t is null then raise exception 'Sem template ativo de oferta para %', d.channel; end if;$a$;
 begin
   d := pg_get_functiondef('public.render_offer_text(uuid,uuid,text)'::regprocedure);
+  if position('spin_text' in d) > 0 then return; end if;
   if position(old in d) = 0 then raise exception 'Migração 016: trecho esperado não encontrado em render_offer_text'; end if;
   execute replace(d, old, old || E'\n  t := public.spin_text(t);');
 end $$;

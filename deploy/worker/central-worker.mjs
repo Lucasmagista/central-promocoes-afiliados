@@ -628,7 +628,16 @@ async function integrationTask(ctx, rt, payload) {
       const c = await ev.connect(payload.pairing_number); return { state: 'connecting', ...c };
     }
     if (action === 'restart') { await ev.restart(); return { restarted: true }; }
-    if (action === 'logout') { await ev.logout(); return { logged_out: true }; }
+    if (action === 'logout') {
+      if (!(await ev.logout())) throw new Error('A Evolution não aceitou desconectar o número');
+      // confere o estado real (a Evolution leva alguns segundos para largar a sessão) e atualiza o painel
+      let state = 'open';
+      for (let i = 0; i < 5 && state === 'open'; i++) { await new Promise((r) => setTimeout(r, 1500)); state = await ev.state().catch(() => 'unknown'); }
+      const st = await evolutionStatus(ctx, rt); st.state = state === 'open' ? 'open' : (state === 'unknown' ? 'close' : state);
+      await ctx.rpc('report_integration_status', { p_provider: 'evolution', p_status: st });
+      if (st.state === 'open') throw new Error('O número continua conectado: a Evolution não encerrou a sessão. Tente de novo ou remova o aparelho em WhatsApp > Aparelhos conectados.');
+      return { logged_out: true, state: st.state };
+    }
     if (action === 'set_webhook') { need(cfg.webhook_url, 'Informe o endereço do webhook do worker (aba WhatsApp).'); await ev.setWebhook(cfg.webhook_url); const w = await ev.getWebhook().catch(() => null); return { webhook: w }; }
     if (action === 'send_test') { const r = await ev.send('sendText', { number: payload.to, text: payload.text }); if (!r.ok) throw new Error(r.error); return { sent: true, message_id: r.messageId }; }
   }
