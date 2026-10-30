@@ -19,8 +19,7 @@
     "db:test": "node scripts/db.mjs test",
     "db:psql": "node scripts/db.mjs psql",
     "e2e": "node scripts/e2e.cjs && node scripts/e2e-novidades.cjs && node scripts/e2e-integracoes.cjs",
-    "n8n:build": "node scripts/n8n-build.mjs",
-    "n8n:test": "node scripts/n8n-test.mjs",
+    "worker:test": "node scripts/worker-test.mjs",
     "release:oracle": "powershell -ExecutionPolicy Bypass -File scripts/release-oracle.ps1"
   }
 }

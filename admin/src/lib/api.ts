@@ -42,24 +42,24 @@ export interface Api {
   saveDestination(d: Partial<Destination> & Pick<Destination, 'channel' | 'external_id' | 'name'>): Promise<void>;
   deleteDestination(id: string): Promise<void>;
   requestDestinationTest(id: string): Promise<void>;
-  /** Grupos/canais que o número ou o bot já conhecem (sincronizados pelo n8n), com marca de "já é destino". */
+  /** Grupos/canais que o número ou o bot já conhecem (sincronizados pelo worker), com marca de "já é destino". */
   listDiscoveredGroups(channel: Channel): Promise<DiscoveredGroup[]>;
   listContacts(channel: Channel, q?: string): Promise<Contact[]>;
   requestGroupRefresh(channel: Channel): Promise<string>;
   requestGroupCreation(i: { channel: Channel; name: string; description: string; participants: Contact[]; key: string }): Promise<string>;
   requestChatVerify(channel: Channel, ref: string): Promise<string>;
-  /** Ação em um grupo/canal existente (executada pelo n8n). Leituras funcionam com a pausa global; alterações não. */
+  /** Ação em um grupo/canal existente (executada pelo worker). Leituras funcionam com a pausa global; alterações não. */
   requestGroupAction(channel: Channel, externalId: string, action: GroupAction, params?: Record<string, unknown>): Promise<string>;
   saveGroupDefaults(config: { [K in keyof GroupDefaults]?: Partial<GroupDefaults[K]> }): Promise<void>;
   getJob(id: string): Promise<ChannelJob>;
   cancelJob(id: string): Promise<void>;
 
-  /** Integrações: configuração sem segredo (settings int_*), segredos só de escrita e ações executadas pelo n8n. */
+  /** Integrações: configuração sem segredo (settings int_*), segredos só de escrita e ações executadas pelo worker. */
   listIntegrationSecrets(): Promise<SecretInfo[]>;
   setIntegrationSecret(key: SecretKey, value: string): Promise<void>;
   clearIntegrationSecret(key: SecretKey): Promise<void>;
   rotateTelegramWebhookSecret(): Promise<void>;
-  saveIntegration(provider: 'evolution' | 'telegram' | 'n8n', config: Record<string, unknown>): Promise<void>;
+  saveIntegration(provider: 'evolution' | 'telegram', config: Record<string, unknown>): Promise<void>;
   requestIntegrationAction(provider: IntProvider, action: string, payload?: Record<string, unknown>): Promise<string>;
   getDatabaseOverview(): Promise<DatabaseOverview>;
   saveDatabaseConfig(config: DatabaseConfig): Promise<void>;

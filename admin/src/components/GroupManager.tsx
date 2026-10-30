@@ -9,7 +9,7 @@ import { CopyBtn } from './integrations';
 const EPH = [{ v: 0, l: 'Desligadas' }, { v: 86400, l: '24 horas' }, { v: 604800, l: '7 dias' }, { v: 7776000, l: '90 dias' }];
 const digits = (v: string) => v.replace(/\D/g, '');
 
-/** Executa uma ação de grupo pelo n8n e acompanha a tarefa; quando termina, devolve o resultado. */
+/** Executa uma ação de grupo pelo worker e acompanha a tarefa; quando termina, devolve o resultado. */
 function useGroupCall(channel: Channel, externalId: string, onDone: (r: GroupActionResult, action: string) => void) {
   const { toast } = useDialogs();
   const [jobId, setJobId] = useState<string | null>(null); const [label, setLabel] = useState(''); const [starting, setStarting] = useState(false);
@@ -62,7 +62,7 @@ export default function GroupManager({ channel, externalId, title, canEdit, onCl
   const go = (a: GroupAction, p?: Record<string, unknown>, l?: string) => void call.start(a, p, l);
 
   const status = busy
-    ? <div className="alert info" role="status"><Loader2 size={16} style={{ animation: 'sp .7s linear infinite', flex: 'none', marginTop: 2 }} /><div>{call.label || 'Executando'}… aguardando o n8n.{waited > 20 && <div className="small" style={{ fontWeight: 400 }}>Está demorando. Confira se o workflow “Central — Ações do painel” está ativo no n8n.</div>}</div></div>
+    ? <div className="alert info" role="status"><Loader2 size={16} style={{ animation: 'sp .7s linear infinite', flex: 'none', marginTop: 2 }} /><div>{call.label || 'Executando'}… aguardando o worker.{waited > 20 && <div className="small" style={{ fontWeight: 400 }}>Está demorando. Confira se o worker está no ar.</div>}</div></div>
     : call.job?.status === 'failed' ? <div className="alert critical" role="alert"><XCircle size={16} style={{ flex: 'none', marginTop: 2 }} /><div>{call.job.last_error || 'A ação falhou.'}</div></div>
     : call.job?.status === 'done' && (res.pending_numbers?.length ?? 0) > 0 ? <div className="alert warning"><TriangleAlert size={16} style={{ flex: 'none', marginTop: 2 }} /><div>{res.added?.length ?? 0} adicionado(s). {res.pending_numbers!.length} número(s) não entraram: {res.pending_numbers!.join(', ')}. O WhatsApp pode recusar quem não tem seu contato; envie o convite por mensagem.</div></div>
     : null;

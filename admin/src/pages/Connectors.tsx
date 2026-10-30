@@ -332,7 +332,7 @@ function ConnectorCard({ c, cats, runs, st, secrets, isAdmin, workerOk, onEdit, 
         </dl>
         {!store && c.notes && <div className="small muted">{c.notes}</div>}
         {!store && c.platform === 'magalu' && isAdmin && <div><Link className="btn" to="/ofertas/nova">Cadastrar oferta manual</Link></div>}
-        {isAdmin && store && !workerOk && <div className="alert warning small"><div>O worker não está ativo, então testes e coleta ficam “aguardando”. Veja <Link to="/configuracoes?aba=n8n">Configurações → Worker</Link>.</div></div>}
+        {isAdmin && store && !workerOk && <div className="alert warning small"><div>O worker não está ativo, então testes e coleta ficam “aguardando”. Veja <Link to="/configuracoes?aba=worker">Configurações → Worker</Link>.</div></div>}
         {A.modal && <ResultModal title={A.modal.title} res={A.modal.res} onClose={A.closeModal} />}
       </div></Card>);
 }
@@ -373,7 +373,7 @@ export default function Connectors() {
 
   const list = q.data ?? []; const secretList = secs.data ?? []; const sMap = settings.data ?? {};
   const progs = list.filter((c) => isStore(c.platform)).map((c) => progress(c, c.config ?? {}, statusOf(sMap, c.platform as IntProvider) as StoreStatus, secretList));
-  const hb = dash.data?.heartbeats.find((h) => h.service === 'n8n'); const workerOk = !!hb && hb.age_seconds < 150;
+  const hb = dash.data?.heartbeats.find((h) => h.service === 'worker'); const workerOk = !!hb && hb.age_seconds < 150;
   const lastRun = (runs.data ?? []).find((r) => r.status !== 'running');
 
   return (

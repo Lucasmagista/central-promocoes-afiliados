@@ -93,7 +93,7 @@ export class DemoChats {
     if (sd.kind !== 'private') this.participants.set(chat.id, this.makeParticipants(Math.min(sd.count, 14), sd));
     return chat;
   }
-  /** Simula o n8n sincronizando todos os grupos conhecidos do canal. */
+  /** Simula o worker sincronizando todos os grupos conhecidos do canal. */
   reveal(channel: Channel) { let n = 0; for (const h of this.hidden.filter((x) => x.channel === channel)) if (this.add(h)) n++; return n; }
   createGroup(channel: Channel, title: string, description: string, people: { external_id: string; display_name: string }[]) {
     const sd: ChatSeed = { id: uid(), channel, external_id: `1203630000${Math.floor(Math.random() * 1e8)}@g.us`, kind: 'group', title, username: null, description: description || null, count: people.length + 1, admin: true, dest: null };

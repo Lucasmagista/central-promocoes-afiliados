@@ -1,6 +1,6 @@
-// Central de Promoções — worker próprio (substitui o n8n).
+// Central de Promoções — worker (processo próprio, sem dependências).
 //
-// Roda exatamente a mesma lógica de deploy/n8n/central-worker.mjs, mas como um processo Node comum:
+// Roda exatamente a mesma lógica de central-worker.mjs como um processo Node comum:
 //   * a cada 5 s   → tarefas pedidas pelo painel (QR code, testes, grupos, conectar conta, coletar agora…)
 //   * a cada 1 min → publica ofertas aprovadas, responde conversas, vigia WhatsApp/Telegram e coleta ofertas das lojas
 //   * HTTP         → recebe os webhooks da Evolution e do Telegram e responde /healthz
@@ -13,7 +13,7 @@
 // Sem dependências: só Node 18+.
 import http from 'node:http';
 import crypto from 'node:crypto';
-import * as W from '../n8n/central-worker.mjs';
+import * as W from './central-worker.mjs';
 
 const num = (k, d, min, max) => { const v = Number(process.env[k]); return Number.isFinite(v) && v >= min && v <= max ? Math.floor(v) : d; };
 const SB = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');

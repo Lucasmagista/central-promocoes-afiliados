@@ -23,7 +23,7 @@ PN="$(grep -E '^NPM_NETWORK=' "$ENVF" | cut -d= -f2- || true)"; PN="${PN:-hubly-
 docker network inspect "$PN" >/dev/null 2>&1 || { log "ERRO: rede Docker '$PN' (a do Nginx Proxy Manager) não existe"; exit 1; }
 COMPOSE="${COMPOSE_FILE:-deploy/docker-compose.oracle.yml}"; [[ -f "$COMPOSE" ]] || COMPOSE="deploy/docker-compose.admin.yml"
 docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --build >>"$LOG" 2>&1 || { log "ERRO no build. Versão anterior segue no ar se o build falhou antes do 'up'. Veja $LOG"; exit 1; }
-# Worker (substitui o n8n): só sobe se deploy/worker/worker.env existir. Falha aqui não derruba o painel.
+# Worker: só sobe se deploy/worker/worker.env existir. Falha aqui não derruba o painel.
 WENV="$DIR/deploy/worker/worker.env"
 if [[ -f "$WENV" && -f deploy/docker-compose.worker.yml ]]; then
   if docker compose -f deploy/docker-compose.worker.yml --env-file "$ENVF" up -d --build >>"$LOG" 2>&1; then

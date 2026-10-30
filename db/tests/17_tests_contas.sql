@@ -136,3 +136,20 @@ begin
   perform test.fails($f$select public.save_integration('evolution', '{"base_url":"http://promo-worker:8787"}')$f$, 'Endereço da Evolution inválido');
   perform test.fails($f$select public.save_integration('telegram', '{"mode":"webhook","webhook_url":"http://promo-worker:8787/hook/telegram-x"}')$f$, 'precisa ser https');
 end $$;
+
+-- ============================================================================
+-- 20. O provedor "n8n" saiu; "worker" assumiu (015)
+-- ============================================================================
+do $$
+begin
+  perform test.as_role('service_role');
+  update public.channel_jobs set requested_at = now() - interval '1 hour';
+  perform test.as_role('authenticated', '00000000-0000-0000-0000-0000000000a1');
+  assert public.request_integration_action('worker', 'selftest') is not null, 'worker aceita o autoteste';
+  perform test.fails($f$select public.request_integration_action('n8n', 'selftest')$f$, 'Ação não existe');
+  perform test.fails($f$select public.save_integration('n8n', '{"base_url":"https://x.com"}')$f$, 'Integração desconhecida');
+  perform test.as_role('service_role');
+  perform public.report_integration_status('worker', '{"ok":true}');
+  perform test.fails($f$select public.report_integration_status('n8n', '{"ok":true}')$f$, 'Integração desconhecida');
+  assert not (public.get_integration_runtime() ? 'n8n'), 'runtime não traz mais o n8n';
+end $$;

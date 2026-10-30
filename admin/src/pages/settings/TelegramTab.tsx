@@ -67,11 +67,11 @@ export default function TelegramTab({ s, secrets, reload, isAdmin }: TabProps) {
           <div className="col" style={{ gap: 5 }}><span style={{ fontWeight: 600, fontSize: 12.5 }}>Como o sistema recebe as mensagens dos chats</span><Seg value={f.mode} onChange={(m) => setF({ ...f, mode: m })} options={[{ v: 'polling', label: 'Consulta (polling)' }, { v: 'webhook', label: 'Webhook' }]} /></div>
           <div className="small muted">{f.mode === 'polling' ? 'Mais simples: o worker pergunta ao Telegram a cada minuto. Não precisa de endereço público. Atraso de até 1 min nas conversas.' : 'Instantâneo: o Telegram chama o worker a cada mensagem. Exige um endereço https público (ex.: https://worker.seudominio.com.br/hook/telegram-…).'}</div>
           {f.mode === 'webhook' && (<>
-            <Field label="Endereço do webhook" hint="https público. O caminho aparece em docker logs promo-worker (ou na Production URL do n8n)."><input value={f.webhook_url} onChange={(e) => setF({ ...f, webhook_url: e.target.value })} placeholder="https://worker.seudominio.com.br/hook/telegram-…" inputMode="url" /></Field>
+            <Field label="Endereço do webhook" hint="https público. O caminho aparece em docker logs promo-worker."><input value={f.webhook_url} onChange={(e) => setF({ ...f, webhook_url: e.target.value })} placeholder="https://worker.seudominio.com.br/hook/telegram-…" inputMode="url" /></Field>
             <div className="row wrap secretrow"><span style={{ fontWeight: 600, fontSize: 12.5 }}>Segredo do webhook</span>
               {hook?.is_set ? <Badge tone="ok">gerado ••••{hook.hint}</Badge> : <Badge tone="warn">ainda não gerado</Badge>}
               <Button size="sm" disabled={!isAdmin} busy={busy === 'rot'} onClick={async () => { if (await run('rot', () => api().rotateTelegramWebhookSecret(), 'Novo segredo gerado. Registre o webhook de novo.')) reload(); }}>{hook?.is_set ? 'Gerar outro' : 'Gerar segredo'}</Button>
-              <span className="small muted">O Telegram envia esse segredo em cada chamada; o n8n recusa quem não o tiver.</span></div>
+              <span className="small muted">O Telegram envia esse segredo em cada chamada; o worker recusa quem não o tiver.</span></div>
           </>)}
           <div className="row wrap">
             <Button variant="primary" icon={<Save size={14} />} disabled={!dirty} busy={busy === 'save-tg'} onClick={save}>Salvar</Button>

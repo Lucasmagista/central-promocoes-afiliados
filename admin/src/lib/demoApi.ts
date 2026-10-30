@@ -86,7 +86,6 @@ function seed(): DemoState {
     banned_terms: ['garantido', 'últimas unidades', 'corre', 'menor preço da história', 'só hoje', 'última chance', 'vai acabar'],
     int_evolution: { base_url: 'https://whatsapp.hubly.software', instance: '', webhook_url: '', send_delay_min_s: 4, send_delay_max_s: 12, alert_numbers: [], alerts: true },
     int_telegram: { enabled: false, mode: 'polling', webhook_url: '', admin_chat_id: '', alerts: true },
-    int_n8n: { base_url: '' },
     int_groups: { whatsapp: { only_admins_send: true, lock_info: true, ephemeral_seconds: 0, add_disclosure: true, add_batch_size: 20, add_delay_s: 6, invite_after_create: true }, telegram: { restrict_members_send: false, add_disclosure: true } },
     allowed_domains: { mercadolivre: ['mercadolivre.com.br'], shopee: ['shopee.com.br'], amazon: ['amazon.com.br', 'amzn.to'], aliexpress: ['aliexpress.com'], magalu: ['magazineluiza.com.br', 'magalu.com'] },
   };
@@ -252,27 +251,27 @@ export function createDemoApi(): Api {
       if (action === 'connect') { if (open()) return { state: 'open', already: true }; evoOpenAt = Date.now() + 9000; return { state: 'connecting', qr: qrSvg(), pairing_code: p.pairing_number ? 'HUB1-2026' : null }; }
       if (action === 'restart') return { restarted: true };
       if (action === 'logout') { evoOpenAt = 0; return { logged_out: true }; }
-      if (action === 'set_webhook') { if (!evo.webhook_url) ERR('Informe o endereço do webhook do n8n (aba WhatsApp).'); return { webhook: { enabled: true, url: evo.webhook_url } }; }
+      if (action === 'set_webhook') { if (!evo.webhook_url) ERR('Informe o endereço do webhook do worker (aba WhatsApp).'); return { webhook: { enabled: true, url: evo.webhook_url } }; }
       if (action === 'send_test') { return { sent: true, message_id: 'DEMO' + Date.now() }; }
     }
-    if (provider === 'n8n') {
+    if (provider === 'worker') {
       if (action === 'selftest') {
         const evoOk = !!(evo.base_url && evo.instance && secret('evolution_api_key')), tgOk = !!(tg.enabled && secret('telegram_bot_token'));
         const checks = [
-          { id: 'env', label: 'Variáveis do n8n (SUPABASE_URL e chave)', ok: true, required: true, detail: 'Banco em demo.supabase.co' },
+          { id: 'env', label: 'Variáveis do worker (SUPABASE_URL e chave)', ok: true, required: true, detail: 'Banco em demo.supabase.co' },
           { id: 'supabase', label: 'Conexão com o Supabase', ok: true, required: true, detail: 'Respondeu em 112 ms' },
           { id: 'sha', label: 'Assinatura (SHA-256, usada pela Shopee)', ok: true, required: true, detail: 'Funcionando' },
           { id: 'evo_cfg', label: 'WhatsApp configurado (endereço, instância e chave)', ok: evoOk, required: false, detail: evoOk ? `whatsapp.hubly.software · instância ${evo.instance}` : 'falta a instância ou a chave' },
           { id: 'tg_cfg', label: 'Telegram configurado (token e ligado)', ok: tgOk, required: false, detail: tgOk ? `modo ${tg.mode}` : 'falta o token do bot ou o Telegram está desligado' },
-          { id: 'hook_wa', label: 'Webhook de entrada do WhatsApp salvo', ok: !!evo.webhook_url, required: false, detail: evo.webhook_url ? 'n8n.exemplo.com/…/central-w…' : 'Cole o endereço na aba WhatsApp (passo 3).' },
+          { id: 'hook_wa', label: 'Webhook de entrada do WhatsApp salvo', ok: !!evo.webhook_url, required: false, detail: evo.webhook_url ? 'promo-worker:8787/hook/…' : 'Cole o endereço na aba WhatsApp (passo 3).' },
           { id: 'hook_tg', label: 'Webhook de entrada do Telegram', ok: tg.mode !== 'webhook' || !!tg.webhook_url, required: false, detail: tg.mode !== 'webhook' ? 'Não usado (modo polling)' : tg.webhook_url ? 'salvo' : 'Modo webhook sem endereço salvo.' },
           { id: 'paused', label: 'Envios liberados', ok: !s.settings.paused, required: false, detail: s.settings.paused ? 'A pausa geral está ligada: nada é publicado até retomar.' : 'Sem pausa' },
         ];
-        const res = { ok: true, checks, ms: 240, supabase_ms: 112, at: iso(0) }; report('n8n', { ok: true, at: res.at }); return res;
+        const res = { ok: true, checks, ms: 240, supabase_ms: 112, at: iso(0) }; report('worker', { ok: true, at: res.at }); return res;
       }
       if (action === 'webhook_check') {
-        const w = (name: string, url: unknown) => url ? { name, configured: true, ok: true, status: 200, ms: 96, target: 'n8n.exemplo.com/…/central-w…', detail: 'O webhook respondeu corretamente.' } : { name, configured: false, ok: false, detail: 'Nenhum endereço salvo.' };
-        const webhooks = [w('WhatsApp (Evolution → n8n)', evo.webhook_url), w('Telegram (bot → n8n)', tg.webhook_url)];
+        const w = (name: string, url: unknown) => url ? { name, configured: true, ok: true, status: 200, ms: 96, target: 'promo-worker:8787/hook/…', detail: 'O webhook respondeu corretamente.' } : { name, configured: false, ok: false, detail: 'Nenhum endereço salvo.' };
+        const webhooks = [w('WhatsApp (Evolution → worker)', evo.webhook_url), w('Telegram (bot → worker)', tg.webhook_url)];
         return { webhooks, ok: webhooks.some((x) => x.configured) };
       }
       if (action === 'run_monitor') return { monitor: { evolution: evoOpenAt > 0 ? 'open' : 'close', telegram: tg.enabled ? 'ok' : undefined } };
@@ -350,7 +349,7 @@ export function createDemoApi(): Api {
     return renderTemplate(tpl!.body, d.channel, { offer: o, disclosure: setting('affiliate_disclosure', ''), shortlinkBase: c?.use_short_link ? setting('shortlink_base', '') : '', code });
   };
 
-  // Simula o worker do n8n: reserva, "envia" e acumula cliques. Respeita a pausa global.
+  // Simula o worker do worker: reserva, "envia" e acumula cliques. Respeita a pausa global.
   setInterval(() => {
     s.heartbeatAt = now();
     chats.tick(!!setting('paused', false));
@@ -426,7 +425,7 @@ export function createDemoApi(): Api {
         connectors: s.connectors.map((c) => ({ platform: c.platform, display_name: c.display_name, mode: c.mode, review_due_at: c.review_due_at, last_success_at: c.last_success_at, last_error_at: c.last_error_at })),
         destinations: s.destinations.map((d) => ({ id: d.id, name: d.name, channel: d.channel, enabled: d.enabled, max_per_day: d.max_per_day, sent_24h: p.filter((x) => x.destination_id === d.id && x.status === 'sent' && in24(x.sent_at)).length })),
         heartbeats: [
-          { service: 'n8n', status: 'ok', last_seen: new Date(s.heartbeatAt).toISOString(), age_seconds: Math.round((now() - s.heartbeatAt) / 1000) },
+          { service: 'worker', status: 'ok', last_seen: new Date(s.heartbeatAt).toISOString(), age_seconds: Math.round((now() - s.heartbeatAt) / 1000) },
           { service: 'evolution-api', status: 'ok', last_seen: iso(-40_000), age_seconds: 40 },
           { service: 'redirecionador', status: 'ok', last_seen: iso(-25_000), age_seconds: 25 },
         ],
@@ -746,13 +745,12 @@ export function createDemoApi(): Api {
         if (mode === 'webhook' && !url) ERR('No modo webhook, informe o endereço do webhook');
         if (config.admin_chat_id && !/^-?\d{5,20}$/.test(String(config.admin_chat_id))) ERR('ID do chat do administrador: só números (ex.: 123456789)');
       }
-      if (provider === 'n8n') https(config.base_url, 'Endereço do n8n');
       s.settings[key] = { ...cur, ...config }; audit('integration_saved', 'integration', provider); await wait(null, 140);
     },
     async requestIntegrationAction(provider, action, payload) {
       needAdmin();
       if (action === 'send_test' && s.settings.paused) ERR('Envios pausados: retome antes de enviar o teste');
-      if (provider === 'n8n' && action === 'run_sender' && s.settings.paused) ERR('Envios pausados: retome antes de rodar o ciclo de envio');
+      if (provider === 'worker' && action === 'run_sender' && s.settings.paused) ERR('Envios pausados: retome antes de rodar o ciclo de envio');
       const dup = jobs.find((j) => j.kind === 'integration' && ['pending', 'claimed'].includes(j.status) && j.payload.provider === provider && j.payload.action === action); if (dup) return dup.id;
       const j: ChannelJob = { id: uid(), kind: 'integration', channel: provider === 'evolution' ? 'whatsapp' : provider === 'telegram' ? 'telegram' : null, payload: { provider, action, ...(payload ?? {}) }, status: 'pending', result: null, last_error: null, requested_at: iso(0), finished_at: null };
       jobs.push(j); audit('integration_action', 'integration', `${provider}:${action}`);

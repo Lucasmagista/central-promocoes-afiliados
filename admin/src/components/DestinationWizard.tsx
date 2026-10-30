@@ -13,7 +13,7 @@ const digits = (s: string) => s.replace(/\D/g, '');
 /** Aceita 11999990001 (DDD+número) e completa com o DDI 55; aceita número já com DDI. */
 const normPhone = (s: string) => { const d = digits(s); if (d.length === 10 || d.length === 11) return '55' + d; return /^\d{12,15}$/.test(d) ? d : null; };
 
-/** Linha de progresso de uma tarefa do n8n (buscar grupos, criar grupo, verificar chat). */
+/** Linha de progresso de uma tarefa do worker (buscar grupos, criar grupo, verificar chat). */
 function JobProgress({ steps, status, error }: { steps: string[]; status: string; error?: string | null }) {
   const at = status === 'pending' ? 0 : status === 'claimed' ? 1 : steps.length - 1;
   return (
@@ -104,7 +104,7 @@ export function DestinationWizard({ cats, initialChat, onClose, onSaved }: { cat
       {step === 1 && <div className="col">
         <div className="choice">
           <button type="button" aria-pressed={mode === 'existing'} onClick={() => setMode('existing')}><b>Escolher um que já existe</b><span>Lista o que o {channel === 'whatsapp' ? 'número' : 'bot'} já conhece, inclusive o que você criou pelo celular.</span></button>
-          {channel === 'whatsapp' ? <button type="button" aria-pressed={mode === 'create'} onClick={() => setMode('create')}><b><Plus size={15} style={{ verticalAlign: -2 }} /> Criar um grupo novo</b><span>Define nome e participantes aqui; o n8n cria o grupo no WhatsApp.</span></button>
+          {channel === 'whatsapp' ? <button type="button" aria-pressed={mode === 'create'} onClick={() => setMode('create')}><b><Plus size={15} style={{ verticalAlign: -2 }} /> Criar um grupo novo</b><span>Define nome e participantes aqui; o worker cria o grupo no WhatsApp.</span></button>
             : <button type="button" aria-pressed={mode === 'verify'} onClick={() => setMode('verify')}><b>Adicionei o bot em um canal novo</b><span>Informe o @canal ou o ID e o painel confirma que o bot enxerga o chat.</span></button>}
           <button type="button" aria-pressed={mode === 'manual'} onClick={() => setMode('manual')}><b>Informar o identificador</b><span>Avançado: {channel === 'whatsapp' ? 'JID do grupo (120363…@g.us)' : 'ID numérico ou @canal'}.</span></button>
         </div>

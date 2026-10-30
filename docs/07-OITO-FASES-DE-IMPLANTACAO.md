@@ -33,9 +33,9 @@ nenhum preço, desconto ou link inventado; `unknown` nunca é reenviado sozinho;
 
 ## Fase 2 — Fundação em simulação
 - [ ] Aplicar `db/migrations/001…009` no Supabase (ordem numérica) e rodar `db/tests` num Postgres de teste.
-- [ ] Subir stacks isoladas: n8n, Evolution API, redirecionador. Sem portas de banco publicadas; sem socket do Docker montado.
+- [ ] Subir stacks isoladas: worker, Evolution API, redirecionador. Sem portas de banco publicadas; sem socket do Docker montado.
 - [ ] Criar os dois bots do Telegram (publicador e admin) com BotFather.
-- [ ] Workflows do n8n chamando as funções `claim_next_publication`, `complete_publication`, `fail_publication`, `mark_publication_unknown`, `release_stale_claims`, `heartbeat` (ver `08-PAINEL-ADMIN-E-BANCO.md`).
+- [ ] O worker chamando as funções `claim_next_publication`, `complete_publication`, `fail_publication`, `mark_publication_unknown`, `release_stale_claims`, `heartbeat` (ver `08-PAINEL-ADMIN-E-BANCO.md`).
 - [ ] Modo **simulação**: uma oferta fictícia percorre cadastro → aprovação → fila → envio simulado → clique.
 - [ ] Backup do banco agendado **e restauração testada** num ambiente limpo.
 

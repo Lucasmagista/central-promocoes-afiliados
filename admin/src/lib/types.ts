@@ -296,13 +296,12 @@ export interface CollectResult {
 }
 
 /* ---------- Integrações (008) ---------- */
-export type IntProvider = 'evolution' | 'telegram' | 'n8n' | 'mercadolivre' | 'shopee' | 'amazon' | 'aliexpress' | 'magalu';
+export type IntProvider = 'evolution' | 'telegram' | 'worker' | 'mercadolivre' | 'shopee' | 'amazon' | 'aliexpress' | 'magalu';
 export type SecretKey = 'evolution_api_key' | 'telegram_bot_token' | 'telegram_webhook_secret' | 'ml_client_secret' | 'shopee_secret' | 'amazon_client_secret' | 'aliexpress_app_secret' | 'supabase_management_token';
 /** O painel nunca recebe o valor de um segredo: só se existe e os 4 últimos caracteres. */
 export interface SecretInfo { key: SecretKey; is_set: boolean; hint: string | null; updated_at: string | null }
 export interface EvolutionConfig { base_url: string; instance: string; webhook_url: string; send_delay_min_s: number; send_delay_max_s: number; alert_numbers: string[]; alerts: boolean }
 export interface TelegramConfig { enabled: boolean; mode: 'polling' | 'webhook'; webhook_url: string; admin_chat_id: string; alerts: boolean }
-export interface N8nConfig { base_url: string }
 export type DatabaseProvider = 'supabase' | 'postgresql' | 'future';
 export interface DatabaseConfig { provider: DatabaseProvider; project_ref: string; api_url: string; migration_mode: 'manual' | 'worker' }
 export interface DatabaseOverview { config: DatabaseConfig; migration_count: number; latest: string | null; management_token_configured: boolean }
@@ -320,7 +319,7 @@ export interface GroupDefaults {
   telegram: { restrict_members_send: boolean; add_disclosure: boolean };
 }
 
-/* ---------- Testes do n8n (010) ---------- */
+/* ---------- Testes do worker (010) ---------- */
 export interface SelfCheck { id: string; label: string; ok: boolean; detail: string; required: boolean }
 export interface SelfTestResult { ok: boolean; checks: SelfCheck[]; ms: number; supabase_ms: number; at: string }
 export interface WebhookCheck { name: string; configured: boolean; ok: boolean; status?: number; ms?: number; target?: string; detail: string }

@@ -1,4 +1,4 @@
-# 11 — Conectores com conta real e a decisão sobre o n8n
+# 11 — Conectores com conta real e o worker
 
 ## 0. Novidades da migração 013 (Amazon, AliExpress, Magalu)
 
@@ -14,9 +14,9 @@
 
 | Área | Situação antes |
 |---|---|
-| Painel de conectores | Cartões com 12 linhas iguais (“nunca”, “não informado”, “—”), tudo vazio, sem dizer o próximo passo. Configuração em 5 abas técnicas (Geral, Afiliado, API, Coleta, Fontes) e um checklist que pedia “nome da credencial no n8n”. |
+| Painel de conectores | Cartões com 12 linhas iguais (“nunca”, “não informado”, “—”), tudo vazio, sem dizer o próximo passo. Configuração em 5 abas técnicas (Geral, Afiliado, API, Coleta, Fontes) e um checklist que pedia “nome da credencial no worker”. |
 | ML e Shopee | Só existia o botão “Testar conexão”. O Mercado Livre usava `client_credentials` (valida o app, **não** a sua conta). Nenhum código buscava ofertas: a tabela de execuções ficava vazia (“Fase 6”). |
-| n8n | Rodava 4 coisas: tarefas do painel (5 s), envio+monitor (1 min), webhooks da Evolution/Telegram e autoteste. Nenhuma delas precisa do n8n em si: a lógica inteira já morava em `deploy/n8n/central-worker.mjs`. |
+| Worker | Executa as tarefas do painel (5 s), envio e monitor (1 min), webhooks da Evolution/Telegram e coleta das lojas, tudo em `deploy/worker`. |
 | Bug latente | `011_database_providers.sql` filtrava o status das integrações com `'int\\_status\\_%'`, que não casa com `int_status_*`: o worker recebia status vazio (alertas de queda do WhatsApp comparavam com “nada”). Corrigido na 012. |
 
 ## 2. O que mudou
@@ -42,31 +42,15 @@
 - Nada disto foi executado contra as APIs reais (precisa das suas credenciais). Os testes usam servidores falsos. **O primeiro teste de verdade é o botão “Testar conexão”.**
 - Respeite os termos de cada programa (frequência, uso de dados, links encurtados). O interruptor de coleta registra a data da revisão e o painel cobra nova revisão a cada 30 dias.
 
-## 4. Precisamos manter o n8n?
+## 4. O worker
 
-**Resposta: não. Mantenha só se você já usa o n8n para outras coisas.** Para esta Central ele é um intermediário sem função própria.
+Um processo Node sem dependências (`deploy/worker/server.mjs` + `central-worker.mjs`), em Docker (`deploy/docker-compose.worker.yml`). Faz o cron de 5 s e de 1 min com trava contra execução dupla, recebe os webhooks (com porteiro, limite de taxa e caminho secreto) e guarda a `service_role` só no `worker.env`. Testes: `npm run worker:test`.
 
-| O que o n8n faz aqui | Precisa dele? | Alternativa (já implementada) |
-|---|---|---|
-| Cron de 5 s e de 1 min | Não | `setInterval` com trava contra execução dupla |
-| Receber webhooks (Evolution, Telegram) | Não | Servidor HTTP de 30 linhas, com porteiro, limite de taxa e segredo |
-| Guardar segredos | Não (e piora) | A `service_role` já fica só no worker; os demais segredos estão no cofre do banco |
-| Editor visual / retries | Não usado: a lógica é código, não nós |  |
-
-Custos de mantê-lo: reimportar o JSON (~100 KB de código embutido) a cada atualização; variável `N8N_BLOCK_ENV_ACCESS_IN_NODE`; sandbox sem `URL` nem `crypto` (o worker traz SHA-256 próprio por causa disso); a chave `service_role` embutida no workflow exportado; 17 mil execuções por dia só para “perguntar se há tarefa”; um serviço a mais para atualizar e monitorar.
-
-**Recomendação:** use o worker próprio (`deploy/worker`, mesma lógica, mesma bateria de 133 testes) e desligue os workflows do n8n depois de validar. O sinal de vida (`heartbeat n8n`) e a aba Configurações → Worker continuam valendo.
-
-### Migrar (10 minutos, reversível)
-1. Aplique `db/migrations/012_contas_afiliado.sql` e `013_novas_plataformas.sql`.
-2. Na pasta `deploy/`: copie `worker/worker.env.example` para `worker/worker.env` e preencha `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
-3. `docker compose -f docker-compose.worker.yml --env-file worker/worker.env up -d --build`
-4. Aponte o Nginx Proxy Manager para `promo-worker:8787` (ex.: `https://worker.seudominio.com.br`). Os caminhos dos webhooks aparecem em `docker logs promo-worker`.
-5. Cole os novos endereços de webhook nas abas WhatsApp e Telegram do painel e use “Definir webhook”.
-6. **Desative** o workflow no n8n (não rode os dois juntos: seriam dois consumidores da mesma fila).
-7. Configurações → Worker → *Rodar autoteste*.
-
-Para voltar ao n8n: pare o contêiner, reative o workflow e reponha os webhooks.
+### Subir
+1. Aplique as migrações `012` a `015` no Supabase.
+2. No servidor: `deploy/worker/worker.env` com `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+3. `./deploy/servidor/atualizar.sh --force` (ou `deploy/servidor/subir.ps1`, no seu computador).
+4. Configurações → Worker → *Rodar autoteste*.
 
 ## 5. Conectar o Mercado Livre (passo a passo)
 1. Em Mercado Livre Developers, crie um aplicativo (conta do Programa de Afiliados). Em *URL de redirecionamento* cadastre `https://SEU-PAINEL/oauth/mercadolivre` (o painel mostra o endereço exato e tem botão Copiar).
@@ -83,12 +67,11 @@ Painel de afiliados da Shopee → Open API → copie App ID e Secret → Conecto
 
 ## 7. Arquivos
 - `db/migrations/012_contas_afiliado.sql` e `013_novas_plataformas.sql` · `db/tests/17_tests_contas.sql`
-- `deploy/n8n/central-worker.mjs` (lojas, OAuth, coleta) · `scripts/n8n-test.mjs` (133 verificações)
-- `deploy/worker/` e `deploy/docker-compose.worker.yml` (worker próprio)
+- `deploy/worker/central-worker.mjs` (lojas, OAuth, coleta) · `scripts/worker-test.mjs`
+- `deploy/worker/` e `deploy/docker-compose.worker.yml` (worker)
 - `admin/src/pages/Connectors.tsx` (painel) · `admin/src/main.tsx` (retorno do OAuth)
 
-## 8. Servidor (Oracle) — o que mudou no projeto
-- **nginx do painel** (`admin/nginx.conf` + `admin/security-headers.conf`): os cabeçalhos de segurança (CSP, X-Frame-Options, nosniff…) agora valem em todas as rotas. Antes o `add_header` do `location /` anulava os do `server`.
-- **Webhook da Evolution pela rede interna** (migração `014`): a Evolution e o worker estão na `hubly-network`, então use `http://promo-worker:8787/hook/whatsapp-…` (o caminho aparece em `docker logs promo-worker`). Só nome de serviço Docker é aceito; para qualquer outro endereço continua valendo https. O **Telegram** precisa de https público (quem chama é o Telegram), por exemplo `https://worker.seudominio.com.br/hook/telegram-…` com um host no Nginx Proxy Manager apontando para `promo-worker:8787`.
-- **`deploy/servidor/atualizar.sh`** agora também sobe o worker quando existir `deploy/worker/worker.env` (ignorado pelo Git). Para agendar: `sudo ./deploy/servidor/instalar-auto-update.sh` (roda uma vez).
-- **Migração no servidor, em ordem:** aplicar `012`, `013`, `014` no Supabase → criar `worker.env` → `atualizar.sh --force` → autoteste → trocar webhooks → desativar o workflow no n8n.
+## 8. Servidor (Oracle)
+- **nginx do painel** (`admin/nginx.conf` + `admin/security-headers.conf`): cabeçalhos de segurança em todas as rotas.
+- **Webhook da Evolution pela rede interna** (migração `014`): `http://promo-worker:8787/hook/whatsapp-…`. O **Telegram** precisa de https público (ex.: `https://worker.seudominio.com.br/hook/telegram-…`, host no proxy apontando para `promo-worker:8787`).
+- **Deploy:** `deploy/servidor/atualizar.sh` (no servidor) e `deploy/servidor/subir.ps1` (no seu computador: testa, envia ao GitHub e atualiza o servidor). O worker sobe junto quando existe `deploy/worker/worker.env`.

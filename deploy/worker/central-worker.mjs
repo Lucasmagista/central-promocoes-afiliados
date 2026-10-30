@@ -1,7 +1,7 @@
-// Central de Promoções — worker do n8n.
+// Central de Promoções — lógica do worker.
 //
-// Este arquivo é a ÚNICA fonte da lógica de integração. O script `npm run n8n:build` o embute nos
-// workflows importáveis (deploy/n8n/*.json) e o teste `npm run n8n:test` o executa contra servidores falsos.
+// Este arquivo é a ÚNICA fonte da lógica de integração. O servidor (deploy/worker/server.mjs) o executa e o teste
+// `npm run worker:test` o executa contra servidores falsos (nada sai da sua máquina).
 //
 // Contrato (ctx):
 //   urls (opcional) -> { telegram, ml } para testes
@@ -20,7 +20,7 @@ const digits = (s) => String(s ?? '').replace(/\D/g, '');
 const jidPhone = (jid) => { const m = /^(\d{8,20})(?::\d+)?@/.exec(String(jid || '')); return m ? m[1] : ''; };
 const isGroupJid = (j) => /@g\.us$/.test(String(j || ''));
 
-/* SHA-256 e HMAC-SHA256 em JavaScript puro (UTF-8): dispensam NODE_FUNCTION_ALLOW_BUILTIN=crypto no n8n. */
+/* SHA-256 e HMAC-SHA256 em JavaScript puro (UTF-8): sem depender de módulos do Node (o mesmo código roda nos testes). */
 const utf8 = (str) => { const out = []; for (const ch of unescape(encodeURIComponent(String(str)))) out.push(ch.charCodeAt(0)); return out; };
 const toHex = (bytes) => bytes.map((v) => (v & 255).toString(16).padStart(2, '0')).join('');
 function sha256Bytes(input) {
@@ -508,16 +508,16 @@ async function evolutionStatus(ctx, rt) {
   return st;
 }
 
-/* ------------------------------------------------------------------ n8n: autoteste e diagnósticos */
-// Leitor de endereço sem depender de `URL` (o ambiente isolado do n8n 2.x não oferece essa classe).
+/* ------------------------------------------------------------------ Worker: autoteste e diagnósticos */
+// Leitor de endereço simples e previsível (não depende da classe `URL`).
 const parseUrl = (u) => { const m = /^(https?:)\/\/(?:[^\/?#\s@]*@)?(\[[^\]]+\]|[^\/?#\s:]+)(:\d+)?([^?#]*)/i.exec(String(u == null ? '' : u).trim()); if (!m) throw new Error('Endereço inválido'); const hostname = m[2].toLowerCase(); return { protocol: m[1].toLowerCase(), hostname, host: hostname + (m[3] || ''), pathname: m[4] || '/' }; };
 const hostOf = (u) => { try { return parseUrl(u).host; } catch { return ''; } };
 const maskUrl = (u) => { try { const x = parseUrl(u); const p = x.pathname.split('/').filter(Boolean); const last = p.pop() || ''; return `${x.host}/…/${last.slice(0, 8)}…`; } catch { return ''; } };
-// Confere o que o n8n precisa para trabalhar. Nunca devolve segredo: só "sim/não" e nomes de servidor.
+// Confere o que o worker precisa para trabalhar. Nunca devolve segredo: só "sim/não" e nomes de servidor.
 export async function selfTest(ctx, rt) {
   const t0 = ctx.now().getTime(); const checks = []; const add = (id, label, ok, detail, required = true) => checks.push({ id, label, ok: !!ok, detail: String(detail || ''), required });
   const env = ctx.env || {};
-  add('env', 'Variáveis do n8n (SUPABASE_URL e chave)', env.has_url && env.has_key, env.has_url && env.has_key ? `Banco em ${env.supabase_host || '—'}` : 'Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no n8n (e N8N_BLOCK_ENV_ACCESS_IN_NODE=false).');
+  add('env', 'Variáveis do worker (SUPABASE_URL e chave)', env.has_url && env.has_key, env.has_url && env.has_key ? `Banco em ${env.supabase_host || '—'}` : 'Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY em deploy/worker/worker.env e reinicie o worker.');
   let ms = 0; try { const a = ctx.now().getTime(); await ctx.rpc('get_integration_runtime', {}); ms = ctx.now().getTime() - a; add('supabase', 'Conexão com o Supabase', true, `Respondeu em ${ms} ms`); } catch (e) { add('supabase', 'Conexão com o Supabase', false, clean(e && e.message)); }
   let sha = ''; try { sha = await (ctx.sha256hex || sha256Hex)('abc'); } catch { /* falha abaixo */ }
   add('sha', 'Assinatura (SHA-256, usada pela Shopee)', sha === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', sha ? 'Funcionando' : 'Indisponível');
@@ -527,7 +527,7 @@ export async function selfTest(ctx, rt) {
   add('hook_wa', 'Webhook de entrada do WhatsApp salvo', !!ev.webhook_url, ev.webhook_url ? maskUrl(ev.webhook_url) : 'Cole o endereço na aba WhatsApp (passo 3).', false);
   add('hook_tg', 'Webhook de entrada do Telegram', tg.mode !== 'webhook' || (tg.webhook_url && sec.telegram_webhook_secret), tg.mode !== 'webhook' ? 'Não usado (modo polling)' : tg.webhook_url ? maskUrl(tg.webhook_url) : 'Modo webhook sem endereço salvo.', false);
   const lim = ctx.limits || {};
-  add('ratelimit', 'Limite de requisições nos webhooks', !!ctx.hasStore, ctx.hasStore ? `Ativo: até ${lim.webhookPorMin || 120} por minuto por webhook` : 'Indisponível neste n8n (sem memória do workflow): os webhooks ficam sem limite de taxa.', false);
+  add('ratelimit', 'Limite de requisições nos webhooks', !!ctx.hasStore, ctx.hasStore ? `Ativo: até ${lim.webhookPorMin || 120} por minuto por webhook` : 'Indisponível: os webhooks ficam sem limite de taxa.', false);
   add('service_role', 'Chave do Supabase é a service_role', !env.key_role || env.key_role === 'service_role' || env.key_role === 'desconhecido', env.key_role === 'anon' ? 'Esta é a chave ANON: as tarefas vão falhar. Use a service_role.' : env.key_role ? `Papel da chave: ${env.key_role}` : '—', true);
   const https = (u) => !u || /^https:\/\//i.test(u) || /^http:\/\/[a-z0-9-]+:\d{2,5}\//i.test(u);
   add('https', 'Endereços usam HTTPS', https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url), https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url) ? 'Tudo em HTTPS' : 'Há endereço sem HTTPS: a chave e as mensagens viajam sem proteção.', false);
@@ -538,10 +538,10 @@ export async function selfTest(ctx, rt) {
   add('paused', 'Envios liberados', !rt.paused, rt.paused ? 'A pausa geral está ligada: nada é publicado até retomar.' : 'Sem pausa', false);
   const bad = checks.filter((c) => c.required && !c.ok);
   const out = { ok: bad.length === 0, checks, ms: ctx.now().getTime() - t0, supabase_ms: ms, at: ctx.now().toISOString() };
-  await ctx.rpc('report_integration_status', { p_provider: 'n8n', p_status: { ok: out.ok, at: out.at, falhas: checks.filter((c) => !c.ok).map((c) => c.id) } }).catch(() => {});
+  await ctx.rpc('report_integration_status', { p_provider: 'worker', p_status: { ok: out.ok, at: out.at, falhas: checks.filter((c) => !c.ok).map((c) => c.id) } }).catch(() => {});
   return out;
 }
-// Chama os próprios webhooks de entrada (como a Evolution/Telegram fariam) para provar que a URL salva chega ao n8n.
+// Chama os próprios webhooks de entrada (como a Evolution/Telegram fariam) para provar que a URL salva chega ao worker.
 async function webhookCheck(ctx, rt) {
   const res = [];
   const one = async (name, url, headers, json) => {
@@ -549,11 +549,11 @@ async function webhookCheck(ctx, rt) {
     const t = ctx.now().getTime();
     try { const r = await ctx.http({ method: 'POST', url, headers, json, timeoutMs: 12000 }); const ms = ctx.now().getTime() - t;
       const ok = r.status === 200 && !!(r.data && r.data.ok);
-      res.push({ name, configured: true, ok, status: r.status, ms, target: maskUrl(url), detail: ok ? 'O webhook respondeu corretamente.' : r.status === 404 ? 'Não encontrado (404): o workflow está ativo? O caminho confere com o do n8n?' : r.status === 401 ? 'Recusado (401): o segredo do webhook do Telegram não confere.' : r.status === 403 ? 'Recusado (403): o nome da instância não confere.' : `Resposta inesperada (HTTP ${r.status}).` });
+      res.push({ name, configured: true, ok, status: r.status, ms, target: maskUrl(url), detail: ok ? 'O webhook respondeu corretamente.' : r.status === 404 ? 'Não encontrado (404): o worker está no ar? O caminho confere com o que aparece em docker logs promo-worker?' : r.status === 401 ? 'Recusado (401): o segredo do webhook do Telegram não confere.' : r.status === 403 ? 'Recusado (403): o nome da instância não confere.' : `Resposta inesperada (HTTP ${r.status}).` });
     } catch (e) { res.push({ name, configured: true, ok: false, target: maskUrl(url), detail: e && e.code === 'timeout' ? 'Sem resposta em 12 s.' : 'Não foi possível alcançar o endereço (DNS, certificado ou servidor fora do ar).' }); }
   };
-  await one('WhatsApp (Evolution → n8n)', rt.evolution.webhook_url, {}, { event: 'central.ping', instance: rt.evolution.instance });
-  await one('Telegram (bot → n8n)', rt.telegram.webhook_url, { 'x-telegram-bot-api-secret-token': rt.secrets.telegram_webhook_secret || '' }, { update_id: 0 });
+  await one('WhatsApp (Evolution → worker)', rt.evolution.webhook_url, {}, { event: 'central.ping', instance: rt.evolution.instance });
+  await one('Telegram (bot → worker)', rt.telegram.webhook_url, { 'x-telegram-bot-api-secret-token': rt.secrets.telegram_webhook_secret || '' }, { update_id: 0 });
   return { webhooks: res, ok: res.filter((r) => r.configured).every((r) => r.ok) && res.some((r) => r.configured) };
 }
 // Executa apenas migrações ainda não registradas. O token de gerenciamento fica
@@ -579,7 +579,7 @@ async function applyDatabaseMigrations(ctx, rt) {
   const pending = migrations.filter((m) => !applied.has(m.version)); const done = [];
   for (const migration of pending) {
     await query(migration.sql);
-    await query(`insert into public.app_schema_migrations(version, applied_by) values ('${String(migration.version).replace(/'/g, "''")}', 'n8n-worker') on conflict (version) do nothing`);
+    await query(`insert into public.app_schema_migrations(version, applied_by) values ('${String(migration.version).replace(/'/g, "''")}', 'worker') on conflict (version) do nothing`);
     done.push(migration.version);
   }
   const out = { ok: true, applied: done, up_to_date: done.length === 0, latest: migrations[migrations.length - 1].version };
@@ -590,7 +590,7 @@ async function applyDatabaseMigrations(ctx, rt) {
 
 async function integrationTask(ctx, rt, payload) {
   const { provider, action } = payload;
-  if (provider === 'n8n') {
+  if (provider === 'worker') {
     if (action === 'selftest') return selfTest(ctx, rt);
     if (action === 'webhook_check') return webhookCheck(ctx, rt);
     if (action === 'run_monitor') return { monitor: await runMonitor(ctx) };
@@ -615,7 +615,7 @@ async function integrationTask(ctx, rt, payload) {
     }
     if (action === 'restart') { await ev.restart(); return { restarted: true }; }
     if (action === 'logout') { await ev.logout(); return { logged_out: true }; }
-    if (action === 'set_webhook') { need(cfg.webhook_url, 'Informe o endereço do webhook do n8n (aba WhatsApp).'); await ev.setWebhook(cfg.webhook_url); const w = await ev.getWebhook().catch(() => null); return { webhook: w }; }
+    if (action === 'set_webhook') { need(cfg.webhook_url, 'Informe o endereço do webhook do worker (aba WhatsApp).'); await ev.setWebhook(cfg.webhook_url); const w = await ev.getWebhook().catch(() => null); return { webhook: w }; }
     if (action === 'send_test') { const r = await ev.send('sendText', { number: payload.to, text: payload.text }); if (!r.ok) throw new Error(r.error); return { sent: true, message_id: r.messageId }; }
   }
   if (provider === 'telegram') {
@@ -777,7 +777,7 @@ async function channelTask(ctx, rt, job) {
 export async function runJobs(ctx, { max = 5 } = {}) {
   let rt = null; let done = 0;
   for (let i = 0; i < max; i++) {
-    const job = await ctx.rpc('claim_channel_job', { p_worker: 'n8n' });
+    const job = await ctx.rpc('claim_channel_job', { p_worker: 'worker' });
     if (!job) break;
     rt = rt || await loadRuntime(ctx);
     try { const res = await channelTask(ctx, rt, job); await ctx.rpc('complete_channel_job', { p_id: job.id, p_result: res }); ctx.log(`tarefa ${job.kind} concluída`); }
@@ -817,7 +817,7 @@ function sender(ctx, rt) {
 
 export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) {
   const t0 = ctx.now().getTime(); const rt = await loadRuntime(ctx); const s = sender(ctx, rt); let sent = 0; let failed = 0; let unknown = 0;
-  await ctx.rpc('heartbeat', { p_service: 'n8n', p_status: 'ok', p_details: {} }).catch(() => {});
+  await ctx.rpc('heartbeat', { p_service: 'worker', p_status: 'ok', p_details: {} }).catch(() => {});
   const left = () => budgetMs - (ctx.now().getTime() - t0);
   // 1) testes de destino
   for (let i = 0; i < 3 && left() > 8000; i++) {
@@ -828,7 +828,7 @@ export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) 
   }
   // 2) publicações de ofertas
   for (let i = 0; i < maxPerRun && left() > 8000; i++) {
-    const p = await ctx.rpc('claim_next_publication', { p_worker: 'n8n' }); if (!p) break;
+    const p = await ctx.rpc('claim_next_publication', { p_worker: 'worker' }); if (!p) break;
     if (p.is_simulated) { await ctx.rpc('complete_publication', { p_id: p.publication_id, p_external_message_id: 'simulado-' + String(p.publication_id).slice(0, 8) }); sent++; continue; }
     const r = await s.send(p.channel, p.external_chat_id, p.rendered_text, p.image_url);
     if (r.ok) { await ctx.rpc('complete_publication', { p_id: p.publication_id, p_external_message_id: r.messageId }); sent++; }
@@ -838,7 +838,7 @@ export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) 
   }
   // 3) respostas manuais das conversas
   for (let i = 0; i < 5 && left() > 8000; i++) {
-    const m = await ctx.rpc('claim_chat_outbox', { p_worker: 'n8n' }); if (!m) break;
+    const m = await ctx.rpc('claim_chat_outbox', { p_worker: 'worker' }); if (!m) break;
     const r = await s.send(m.channel, m.chat_external_id, m.text);
     if (r.ok) await ctx.rpc('complete_chat_outbox', { p_id: m.outbox_id, p_external_message_id: r.messageId });
     else await ctx.rpc('fail_chat_outbox', { p_id: m.outbox_id, p_error: r.ambiguous ? `${r.error} — resultado incerto: confira no aplicativo antes de reenviar` : r.error });

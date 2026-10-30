@@ -1,17 +1,17 @@
 # Central de Promoções e Afiliados
 
-Painel operacional para revisar ofertas, publicar em Telegram e WhatsApp, acompanhar conversas e manter auditoria. O projeto usa Supabase gerenciado como plataforma de dados e autorização, painel React estático e n8n na Oracle Cloud para integrações externas.
+Painel operacional para revisar ofertas, publicar em Telegram e WhatsApp, acompanhar conversas e manter auditoria. O projeto usa Supabase gerenciado como plataforma de dados e autorização, painel React estático e worker na Oracle Cloud para integrações externas.
 
 ## Arquitetura em produção
 
 ```text
 Navegador ─HTTPS→ proxy reverso ─→ painel React/Nginx (Oracle)
-                                  └→ n8n (Oracle, acesso administrativo restrito)
+                                  └→ worker (Oracle, acesso administrativo restrito)
 Painel ─anon key→ Supabase (Auth, Postgres, RLS, RPC e auditoria)
-n8n ─service_role→ Supabase ─→ Telegram / Evolution API / conectores autorizados
+worker ─service_role→ Supabase ─→ Telegram / Evolution API / conectores autorizados
 ```
 
-O navegador nunca recebe `service_role`, tokens de bots ou chaves de marketplaces. O banco aplica autorização, fila, limites e idempotência; o n8n executa tarefas e chamadas externas.
+O navegador nunca recebe `service_role`, tokens de bots ou chaves de marketplaces. O banco aplica autorização, fila, limites e idempotência; o worker executa tarefas e chamadas externas.
 
 ## Estado das integrações
 
@@ -39,7 +39,7 @@ npm run db:test
 
 ## Implantação na Oracle
 
-O guia completo está em [06-IMPLANTACAO-E-ROADMAP.md](06-IMPLANTACAO-E-ROADMAP.md). A ordem segura é aplicar migrações, publicar painel, configurar n8n, importar workflows, testar em simulação e homologar cada canal antes de liberar produção. A partir da migração 011, a aba **Banco de dados** registra o provedor e pode solicitar ao worker a aplicação de arquivos SQL pendentes no Supabase; a primeira instalação da 011 permanece manual.
+O guia completo está em [06-IMPLANTACAO-E-ROADMAP.md](06-IMPLANTACAO-E-ROADMAP.md). A ordem segura é aplicar migrações, publicar painel, configurar o worker, testar em simulação e homologar cada canal antes de liberar produção. A partir da migração 011, a aba **Banco de dados** registra o provedor e pode solicitar ao worker a aplicação de arquivos SQL pendentes no Supabase; a primeira instalação da 011 permanece manual.
 
 ## Documentação
 
@@ -49,7 +49,7 @@ O guia completo está em [06-IMPLANTACAO-E-ROADMAP.md](06-IMPLANTACAO-E-ROADMAP.
 - [Integrações e conformidade](05-INTEGRACOES-E-COMPLIANCE.md)
 - [Implantação, operação e recuperação](06-IMPLANTACAO-E-ROADMAP.md)
 - [Banco, painel e permissões](docs/08-PAINEL-ADMIN-E-BANCO.md)
-- [Desenvolvimento, conversas e n8n](docs/09-RODAR-LOCAL-E-CONVERSAS.md)
+- [Desenvolvimento, conversas e worker](docs/09-RODAR-LOCAL-E-CONVERSAS.md)
 
 ## Segurança
 

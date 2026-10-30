@@ -35,7 +35,7 @@ export default function WhatsAppTab({ s, secrets, reload, isAdmin }: TabProps) {
   const dirty = stable(out) !== stable(cfg);
   const connOk = !!(out.base_url && out.instance && (keyInfo?.is_set || newKey.trim()));
 
-  const test = useIntAction();    // teste de envio (executado pelo n8n)
+  const test = useIntAction();    // teste de envio (executado pelo worker)
   const [testTo, setTestTo] = useState(''); const [testText, setTestText] = useState('Teste da Central de Promoções: a integração com o WhatsApp está funcionando.');
   const st2 = live ? STATES[live.state] : null;
   const sm = st2 ?? (!st.reachable && st.reachable !== undefined ? { label: 'Servidor sem resposta', tone: 'bad' as const, help: String(st.error ?? 'Confira o endereço e se o servidor está no ar.') } : STATES[String(st.state ?? '')]);
@@ -112,7 +112,7 @@ export default function WhatsAppTab({ s, secrets, reload, isAdmin }: TabProps) {
 
       <Card title="3. Receber mensagens (webhook)" actions={st.webhook ? <Badge tone={(st.webhook as { matches?: boolean }).matches ? 'ok' : 'warn'}>{(st.webhook as { matches?: boolean }).matches ? 'configurado' : 'diferente do salvo'}</Badge> : undefined}>
         <fieldset disabled={!isAdmin} className="bare"><div className="col">
-          <div className="small muted">É assim que as conversas dos grupos aparecem em <b>WhatsApp → Conversas</b>. Cole abaixo o endereço do webhook (do worker, ou o <i>Production URL</i> do n8n), salve e depois use <b>Configurar webhook</b> no passo 2. Com o worker no mesmo servidor use o endereço interno: <code>http://promo-worker:8787/hook/whatsapp-…</code> (aparece em <code>docker logs promo-worker</code>).</div>
+          <div className="small muted">É assim que as conversas dos grupos aparecem em <b>WhatsApp → Conversas</b>. Cole abaixo o endereço do webhook, salve e depois use <b>Configurar webhook</b> no passo 2. Com o worker no mesmo servidor use o endereço interno: <code>http://promo-worker:8787/hook/whatsapp-…</code> (aparece em <code>docker logs promo-worker</code>).</div>
           <Field label="Endereço do webhook" hint="http://promo-worker:8787/hook/whatsapp-… (rede interna) ou https://… público."><input value={f.webhook_url} onChange={(e) => setF({ ...f, webhook_url: e.target.value })} placeholder="http://promo-worker:8787/hook/whatsapp-…" inputMode="url" /></Field>
           <div className="row wrap">
             <Button variant="primary" icon={<Save size={14} />} disabled={!dirty} busy={busy === 'save-evo'} onClick={save}>Salvar</Button>

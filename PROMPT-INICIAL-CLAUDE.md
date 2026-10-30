@@ -10,7 +10,7 @@ Criar uma aplicação modular que receba ofertas de fontes autorizadas de Mercad
 
 ## Contexto de implantação
 
-O projeto será executado em servidor pessoal Linux com Docker e Portainer. O usuário pode já ter PostgreSQL, Redis, n8n, proxy reverso e Evolution API usados por outros projetos. Portanto:
+O projeto será executado em servidor pessoal Linux com Docker e Portainer. O usuário pode já ter PostgreSQL, Redis, worker, proxy reverso e Evolution API usados por outros projetos. Portanto:
 - não recrie nem modifique stacks existentes;
 - crie um stack isolado com nomes, rede e volumes próprios;
 - antes de propor comandos de deploy, inspecione o ambiente e faça perguntas quando faltarem dados;
@@ -31,7 +31,7 @@ O projeto será executado em servidor pessoal Linux com Docker e Portainer. O us
 - Docker Compose;
 - Telegram Bot API oficial;
 - adapter independente para Evolution API, inicialmente desabilitado;
-- n8n opcional, não obrigatório para o núcleo.
+- O worker é o único executor de tarefas externas.
 
 Escolha dependências estáveis e compatíveis. Fixe versões razoáveis e documente decisões. Não adicione bibliotecas desnecessárias.
 

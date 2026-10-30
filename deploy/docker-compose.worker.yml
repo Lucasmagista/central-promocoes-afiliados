@@ -1,4 +1,4 @@
-# Worker da Central (substitui o n8n). Rode a partir da pasta deploy/:
+# Worker da Central. Rode a partir da pasta deploy/:
 #   docker compose -f docker-compose.worker.yml --env-file worker/worker.env up -d --build
 # Aponte o Nginx Proxy Manager para promo-worker:8787 (ex.: https://worker.seudominio.com.br).
 # Os webhooks aparecem no log de inicialização: docker logs promo-worker

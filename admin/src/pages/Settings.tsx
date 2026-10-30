@@ -8,15 +8,15 @@ import { Badge, Button, Card, ErrorBox, Field, Loading, PageHead, Seg, useAction
 import { statusOf } from '../components/integrations';
 import WhatsAppTab from './settings/WhatsAppTab';
 import TelegramTab from './settings/TelegramTab';
-import N8nTab from './settings/N8nTab';
+import WorkerTab from './settings/WorkerTab';
 import DatabaseTab from './settings/DatabaseTab';
 
-type Tab = 'operacao' | 'whatsapp' | 'telegram' | 'n8n' | 'banco' | 'compliance' | 'avancado';
+type Tab = 'operacao' | 'whatsapp' | 'telegram' | 'worker' | 'banco' | 'compliance' | 'avancado';
 const TABS: { v: Tab; label: string; icon: JSX.Element }[] = [
   { v: 'operacao', label: 'Operação', icon: <Gauge size={16} /> },
   { v: 'whatsapp', label: 'WhatsApp', icon: <Smartphone size={16} /> },
   { v: 'telegram', label: 'Telegram', icon: <Bot size={16} /> },
-  { v: 'n8n', label: 'Worker (n8n)', icon: <Workflow size={16} /> },
+  { v: 'worker', label: 'Worker', icon: <Workflow size={16} /> },
   { v: 'banco', label: 'Banco de dados', icon: <Database size={16} /> },
   { v: 'compliance', label: 'Regras de publicação', icon: <FileText size={16} /> },
   { v: 'avancado', label: 'Avançado', icon: <SlidersHorizontal size={16} /> },
@@ -113,7 +113,7 @@ export default function SettingsPage() {
           {tab === 'operacao' && <fieldset disabled={!isAdmin} className="bare"><Operacao s={s} reload={reload} /></fieldset>}
           {tab === 'whatsapp' && <WhatsAppTab {...props} />}
           {tab === 'telegram' && <TelegramTab {...props} />}
-          {tab === 'n8n' && <N8nTab {...props} />}
+          {tab === 'worker' && <WorkerTab {...props} />}
           {tab === 'banco' && <DatabaseTab isAdmin={isAdmin} />}
           {tab === 'compliance' && <fieldset disabled={!isAdmin} className="bare"><Compliance s={s} reload={reload} /></fieldset>}
           {tab === 'avancado' && <Avancado s={s} />}

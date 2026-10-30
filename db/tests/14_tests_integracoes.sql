@@ -2,7 +2,7 @@
 \set QUIET on
 
 -- ============================================================================
--- 10. Integrações: segredos write-only, configuração validada, ações via n8n
+-- 10. Integrações: segredos write-only, configuração validada, ações via worker
 -- ============================================================================
 do $$
 declare v_job uuid; v_job2 uuid; j jsonb; n integer; v_cfg jsonb;
@@ -21,7 +21,7 @@ begin
   perform test.fails($f$select public.save_integration('evolution', '{"alert_numbers":["123"]}')$f$, 'Números de alerta');
   perform public.save_integration('telegram', '{"enabled":true,"admin_chat_id":"@meu_canal","mode":"polling"}');
   perform test.fails($f$select public.save_integration('telegram', '{"mode":"webhook"}')$f$, 'informe o endereço do webhook');
-  perform public.save_integration('telegram', '{"mode":"webhook","webhook_url":"https://n8n.hubly.software/webhook/telegram"}');
+  perform public.save_integration('telegram', '{"mode":"webhook","webhook_url":"https://worker.hubly.software/hook/telegram-abc"}');
   perform test.fails($f$select public.save_integration('telegram', '{"mode":"magia"}')$f$, 'polling ou webhook');
 
   -- segredos: validação, escrita, ninguém lê

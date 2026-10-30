@@ -1,12 +1,12 @@
-// Testa o worker do n8n contra Evolution, Telegram, Mercado Livre e Shopee FALSOS (nada sai da sua máquina).
+// Testa o worker contra Evolution, Telegram, Mercado Livre e Shopee FALSOS (nada sai da sua máquina).
 // Todos os valores sensíveis abaixo são aleatórios, gerados a cada execução.
-// Uso: npm run n8n:test
+// Uso: npm run worker:test
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as W from '../deploy/n8n/central-worker.mjs';
+import * as W from '../deploy/worker/central-worker.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const rnd = (n = 20) => crypto.randomBytes(n).toString('hex').slice(0, n);
@@ -163,8 +163,8 @@ const sql = readdirSync(join(root, 'db', 'migrations')).map((f) => readFileSync(
 const params = {}; for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)/g)) params[m[1]] = m[2].split(',').map((x) => x.trim().split(/\s+/)[0]).filter((x) => /^p(_|$)/.test(x));
 const db = {
   secrets: { evolution_api_key: EVO_KEY, telegram_bot_token: TG_TOKEN, telegram_webhook_secret: TG_HOOK, ml_client_secret: ML_SECRET, shopee_secret: SP_SECRET },
-  evolution: { base_url: evoSrv.url, instance: 'central', webhook_url: 'https://n8n.exemplo.com/webhook/wa', send_delay_min_s: 1, send_delay_max_s: 1, alerts: true },
-  telegram: { enabled: true, mode: 'polling', webhook_url: 'https://n8n.exemplo.com/webhook/tg', admin_chat_id: '555', alerts: true },
+  evolution: { base_url: evoSrv.url, instance: 'central', webhook_url: 'https://worker.exemplo.com/hook/whatsapp-x', send_delay_min_s: 1, send_delay_max_s: 1, alerts: true },
+  telegram: { enabled: true, mode: 'polling', webhook_url: 'https://worker.exemplo.com/hook/telegram-x', admin_chat_id: '555', alerts: true },
   groups: { whatsapp: { only_admins_send: true, lock_info: true, ephemeral_seconds: 604800, add_disclosure: true, add_batch_size: 2, add_delay_s: 2, invite_after_create: true }, telegram: {} }, disclosure: 'Link de afiliado: posso receber comissão.',
   status: {}, runs: [], offers: [], rejectedOffers: [], jobs: [], pubs: [], outbox: [], tests: [], ingested: [], calls: [], completed: {}, failed: {}, pubResults: [],
   connectors: { shopee: { mode: 'api_ready', config: { app_id: 'APP1', api_endpoint: null } }, mercadolivre: { mode: 'api_pending', config: { app_id: '111' } }, amazon: { mode: 'disabled', config: {} } },
@@ -175,7 +175,7 @@ const rpc = async (name, args) => {
   if (params[name]) { for (const k of Object.keys(args || {})) if (!params[name].includes(k)) throw new Error(`argumento "${k}" não existe em ${name}(${params[name].join(', ')})`); }
   else unchecked.add(name);
   switch (name) {
-    case 'get_integration_runtime': return JSON.parse(JSON.stringify({ evolution: db.evolution, telegram: db.telegram, n8n: {}, groups: db.groups, disclosure: db.disclosure, paused: false, status: db.status, secrets: db.secrets, connectors: db.connectors }));
+    case 'get_integration_runtime': return JSON.parse(JSON.stringify({ evolution: db.evolution, telegram: db.telegram, groups: db.groups, disclosure: db.disclosure, paused: false, status: db.status, secrets: db.secrets, connectors: db.connectors }));
     case 'claim_channel_job': { const j = db.jobs.find((x) => x.status === 'pending'); if (!j) return null; j.status = 'claimed'; return { id: j.id, kind: j.kind, channel: j.channel, payload: j.payload }; }
     case 'complete_channel_job': { const j = db.jobs.find((x) => x.id === args.p_id); j.status = 'done'; j.result = args.p_result; return null; }
     case 'fail_channel_job': { const j = db.jobs.find((x) => x.id === args.p_id); j.status = 'failed'; j.error = args.p_error; return null; }
@@ -230,7 +230,7 @@ evo.state = 'open'; j = job('integration', 'whatsapp', { provider: 'evolution', 
 ok(j.result.already === true, 'connect em instância já conectada não gera QR');
 
 j = job('integration', 'whatsapp', { provider: 'evolution', action: 'set_webhook' }); await W.runJobs(ctx);
-ok(j.status === 'done' && evo.webhook.url === 'https://n8n.exemplo.com/webhook/wa', 'set_webhook configura a Evolution (formato v2)');
+ok(j.status === 'done' && evo.webhook.url === 'https://worker.exemplo.com/hook/whatsapp-x', 'set_webhook configura a Evolution (formato v2)');
 db.secrets.evolution_api_key = 'errada' + rnd(20);
 j = job('integration', 'whatsapp', { provider: 'evolution', action: 'status' }); await W.runJobs(ctx);
 ok(j.status === 'failed' && /401/.test(j.error), 'chave errada vira erro claro');
@@ -310,7 +310,7 @@ tgs.gmode = 'ok';
 j = ga('telegram', TGC, 'leave'); await W.runJobs(ctx);
 ok(j.result.left === true && tgs.group.at(-1)[0] === 'leaveChat', 'telegram: sair do chat');
 
-/* ---------- n8n: autoteste, webhooks de entrada, SHA-256 puro ---------- */
+/* ---------- Worker: autoteste, webhooks de entrada, SHA-256 puro ---------- */
 for (const t of ['abc', '', 'Shopee 123 ação ✓ ' + rnd(60), 'x'.repeat(200)]) ok(W.sha256Hex(t) === crypto.createHash('sha256').update(t).digest('hex'), `sha256 puro confere (${JSON.stringify(t).slice(0, 18)})`);
 const hookSrv = await listen(async (req, res) => {
   const b = JSON.parse((await readBody(req)) || '{}');
@@ -320,26 +320,26 @@ const hookSrv = await listen(async (req, res) => {
 });
 db.evolution.webhook_url = hookSrv.url + '/webhook/wa'; db.telegram.webhook_url = hookSrv.url + '/webhook/tg';
 ctx.env = { has_url: true, has_key: true, supabase_host: 'meu.supabase.co' };
-j = job('integration', null, { provider: 'n8n', action: 'selftest' }); await W.runJobs(ctx);
-ok(j.status === 'done' && j.result.ok === true && j.result.checks.find((c) => c.id === 'sha').ok && j.result.checks.find((c) => c.id === 'env').detail.includes('meu.supabase.co'), 'n8n/selftest: tudo certo');
-ok(db.status.n8n && db.status.n8n.ok === true, 'n8n/selftest grava o resultado para o painel');
+j = job('integration', null, { provider: 'worker', action: 'selftest' }); await W.runJobs(ctx);
+ok(j.status === 'done' && j.result.ok === true && j.result.checks.find((c) => c.id === 'sha').ok && j.result.checks.find((c) => c.id === 'env').detail.includes('meu.supabase.co'), 'worker/selftest: tudo certo');
+ok(db.status.worker && db.status.worker.ok === true, 'worker/selftest grava o resultado para o painel');
 ok(!JSON.stringify(j.result).includes(EVO_KEY) && !JSON.stringify(j.result).includes(TG_TOKEN) && !JSON.stringify(j.result).includes(TG_HOOK), 'selftest não vaza segredos');
 ctx.env = { has_url: false, has_key: true, supabase_host: '' };
-j = job('integration', null, { provider: 'n8n', action: 'selftest' }); await W.runJobs(ctx);
+j = job('integration', null, { provider: 'worker', action: 'selftest' }); await W.runJobs(ctx);
 ok(j.result.ok === false && j.result.checks.find((c) => c.id === 'env').ok === false, 'selftest acusa variável faltando');
 ctx.env = { has_url: true, has_key: true, supabase_host: 'meu.supabase.co' };
-j = job('integration', null, { provider: 'n8n', action: 'webhook_check' }); await W.runJobs(ctx);
+j = job('integration', null, { provider: 'worker', action: 'webhook_check' }); await W.runJobs(ctx);
 ok(j.status === 'done' && j.result.ok === true && j.result.webhooks.length === 2 && j.result.webhooks.every((w) => w.ok), 'webhook_check: WhatsApp e Telegram respondem');
 ok(!JSON.stringify(j.result).includes('/webhook/wa') , 'webhook_check mascara o caminho secreto');
 db.secrets.telegram_webhook_secret = 'errado' + rnd(10);
-j = job('integration', null, { provider: 'n8n', action: 'webhook_check' }); await W.runJobs(ctx);
+j = job('integration', null, { provider: 'worker', action: 'webhook_check' }); await W.runJobs(ctx);
 ok(j.result.ok === false && /401/.test(j.result.webhooks[1].detail), 'webhook_check: segredo do Telegram errado vira explicação');
 db.secrets.telegram_webhook_secret = TG_HOOK;
 db.evolution.webhook_url = hookSrv.url + '/nada';
-j = job('integration', null, { provider: 'n8n', action: 'webhook_check' }); await W.runJobs(ctx);
-ok(/404/.test(j.result.webhooks[0].detail), 'webhook_check: 404 sugere conferir o workflow ativo');
-db.evolution.webhook_url = 'https://n8n.exemplo.com/webhook/wa'; db.telegram.webhook_url = 'https://n8n.exemplo.com/webhook/tg';
-j = job('integration', null, { provider: 'n8n', action: 'run_monitor' }); await W.runJobs(ctx);
+j = job('integration', null, { provider: 'worker', action: 'webhook_check' }); await W.runJobs(ctx);
+ok(/404/.test(j.result.webhooks[0].detail), 'webhook_check: 404 sugere conferir o worker');
+db.evolution.webhook_url = 'https://worker.exemplo.com/hook/whatsapp-x'; db.telegram.webhook_url = 'https://worker.exemplo.com/hook/telegram-x';
+j = job('integration', null, { provider: 'worker', action: 'run_monitor' }); await W.runJobs(ctx);
 ok(j.status === 'done' && j.result.monitor && 'evolution' in j.result.monitor, 'run_monitor roda o monitor');
 hookSrv.s.close();
 
@@ -430,59 +430,6 @@ db.status.evolution = { state: 'open' }; evo.state = 'close'; tgs.sent = []; awa
 ok(tgs.sent.some((m) => String(m.chat_id) === '555'), 'monitor: avisa o administrador quando o WhatsApp cai');
 ok(db.status.evolution.state === 'close', 'monitor: estado atualizado');
 
-const { execFileSync } = await import('node:child_process');
-execFileSync('node', [join(root, 'scripts', 'n8n-build.mjs')], { stdio: 'pipe' });
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-const wfFiles = [join('deploy', 'n8n'), join('deploy', 'n8n', 'separados')].flatMap((d) => readdirSync(join(root, d)).filter((x) => /^\d\d-.*\.json$/.test(x)).map((x) => join(d, x)));
-for (const f of wfFiles) {
-  const wfj = JSON.parse(readFileSync(join(root, f), 'utf8'));
-  const codeNodes = wfj.nodes.filter((n) => n.type === 'n8n-nodes-base.code');
-  let good = codeNodes.length > 0; for (const cn of codeNodes) { try { new AsyncFunction('$env', '$input', 'require', cn.parameters.jsCode); } catch (e) { good = false; console.log(cn.name, e.message); } }
-  const names = new Set(wfj.nodes.map((n) => n.name)); const conn = names.size === wfj.nodes.length && Object.entries(wfj.connections).every(([a, v]) => names.has(a) && v.main[0].every((t) => names.has(t.node)));
-  ok(good && conn, `workflow ${f}: ${codeNodes.length} código(s) compila(m), nomes únicos e conexões válidas`);
-}
-// Executa de verdade o código embutido no arquivo completo contra um Supabase falso por HTTP.
-const sbSrv = await listen(async (req, res) => {
-  if (req.headers.authorization !== 'Bearer SRK' ) return send(res, 401, { message: 'bad key' });
-  const name = req.url.split('/rpc/')[1]; await readBody(req);
-  if (name === 'get_integration_runtime') return send(res, 200, { evolution: { base_url: evoSrv.url, instance: 'central' }, telegram: { enabled: false }, groups: {}, secrets: { evolution_api_key: EVO_KEY }, status: {}, connectors: {}, paused: false });
-  send(res, 200, null);
-});
-const full = JSON.parse(readFileSync(join(root, 'deploy', 'n8n', '00-central-completo.json'), 'utf8'));
-let staticStore = {};
-const runNode = async (name, env, input = {}) => {
-  const n = full.nodes.find((x) => x.name === name); const self = { helpers: { httpRequest: async (o) => { const r = await fetch(o.url, { method: o.method, headers: o.headers, body: o.body, signal: AbortSignal.timeout(5000) }); return { statusCode: r.status, body: await r.text() }; } } };
-  const fn = new AsyncFunction('$env', '$input', 'require', '$getWorkflowStaticData', n.parameters.jsCode);
-  return (await fn.call(self, env, { first: () => ({ json: input }) }, () => { throw new Error('require bloqueado'); }, () => staticStore))[0].json;
-};
-let r = await runNode('Rodar autoteste', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' });
-ok(r.ok === true && r.checks.find((c) => c.id === 'supabase').ok && r.checks.find((c) => c.id === 'sha').ok, 'arquivo completo: autoteste executa de verdade (sem require)');
-r = await runNode('Rodar autoteste', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'errada' });
-ok(r.ok === false && /Supabase get_integration_runtime respondeu 401/.test(r.checks[0].detail), 'autoteste: chave do Supabase errada vira mensagem clara');
-r = await runNode('Rodar autoteste', {});
-ok(r.ok === false && /SUPABASE_URL/.test(r.checks[0].detail), 'autoteste: variáveis ausentes explicadas');
-const blocked = new Proxy({}, { get() { throw new Error('access to env vars denied'); } });
-r = await runNode('Rodar autoteste', blocked);
-ok(r.ok === false && /N8N_BLOCK_ENV_ACCESS_IN_NODE/.test(r.checks[0].detail), 'autoteste: env bloqueado pelo n8n explicado');
-// ---- configuração embutida no arquivo (sem variáveis de ambiente) ----
-{
-  const cn = full.nodes.find((x) => x.name === 'Rodar autoteste');
-  ok(cn.parameters.jsCode.includes("key: 'COLE_AQUI_A_SERVICE_ROLE_KEY'"), 'arquivo traz o marcador da chave para trocar');
-  const baked = JSON.parse(JSON.stringify(full)); const bn = baked.nodes.find((x) => x.name === 'Rodar autoteste');
-  bn.parameters.jsCode = bn.parameters.jsCode.split('COLE_AQUI_A_URL_DO_SUPABASE').join(sbSrv.url).split('COLE_AQUI_A_SERVICE_ROLE_KEY').join('SRK');
-  const keep = full.nodes; full.nodes = baked.nodes;
-  const blockedEnv = new Proxy({}, { get() { throw new Error('access to env vars denied'); } });
-  const rr = await runNode('Rodar autoteste', blockedEnv);
-  ok(rr.ok === true && rr.checks.find((c) => c.id === 'supabase').ok, 'config embutida: funciona mesmo com variáveis de ambiente bloqueadas');
-  full.nodes = keep;
-}
-r = await runNode('Executar tarefas do painel', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' });
-ok(r.done === 0, 'arquivo completo: worker de tarefas executa (fila vazia)');
-r = await runNode('Gravar mensagem do WhatsApp', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' }, { body: { instance: 'central', event: 'connection.update' } });
-ok(r.ok === true && r.ignored === true, 'arquivo completo: webhook do WhatsApp ignora eventos que não são mensagem');
-r = await runNode('Gravar mensagem do WhatsApp', { SUPABASE_URL: sbSrv.url, SUPABASE_SERVICE_ROLE_KEY: 'SRK' }, { body: { instance: 'outra', event: 'messages.upsert' } });
-ok(r.ok === false && r.status === 403, 'arquivo completo: instância errada é recusada (403)');
-sbSrv.s.close();
 const used = [...new Set(db.calls)]; const missing = used.filter((n) => !params[n]);
 ok(missing.length === 0, 'contrato: toda função RPC usada existe nas migrações' + (missing.length ? ' — faltam: ' + missing.join(', ') : ''));
 
@@ -608,28 +555,18 @@ j = job('integration', null, { provider: 'magalu', action: 'collect' }); await W
 ok(j.status === 'failed', 'Magalu: coleta automática não existe');
 
 for (const s of [evoSrv, tgSrv, ml, shopee, ali, amz]) s.s.close();
-// ---- segurança do arquivo completo ----
-const E0 = { SUPABASE_URL: 'http://127.0.0.1:1', SUPABASE_SERVICE_ROLE_KEY: 'x' };
-staticStore = {};
-let g = await runNode('Porteiro Telegram (segurança)', E0, { headers: {}, body: { update_id: 1 } });
+// ---- porteiro dos webhooks de entrada ----
+const mkLimit = () => { const n = {}; return (key) => { n[key] = (n[key] || 0) + 1; return { ok: n[key] <= 120, retryAfter: 30 }; }; };
+const gctx = () => ({ limits: { webhookPorMin: 120, corpoMaxKb: 256 }, limit: mkLimit() });
+let g = W.guardWebhook(gctx(), 'telegram', { headers: {}, body: { update_id: 1 } });
 ok(g.blocked === true && g.status === 401, 'porteiro Telegram: sem segredo é recusado (401) antes do banco');
-g = await runNode('Porteiro Telegram (segurança)', E0, { headers: { 'x-telegram-bot-api-secret-token': 'a'.repeat(32) }, body: { update_id: 1 } });
+g = W.guardWebhook(gctx(), 'telegram', { headers: { 'x-telegram-bot-api-secret-token': 'a'.repeat(32) }, body: { update_id: 1 } });
 ok(g.blocked === false, 'porteiro Telegram: com cabeçalho passa para validação');
-g = await runNode('Porteiro WhatsApp (segurança)', E0, { body: { foo: 1 } });
+g = W.guardWebhook(gctx(), 'whatsapp', { headers: {}, body: { foo: 1 } });
 ok(g.blocked === true && g.status === 400, 'porteiro WhatsApp: formato inválido é recusado (400)');
-g = await runNode('Porteiro WhatsApp (segurança)', E0, { body: 'x'.repeat(300 * 1024) });
-ok(g.blocked === true, 'porteiro WhatsApp: corpo gigante é recusado');
-staticStore = {};
-let last; for (let i = 0; i < 125; i++) last = await runNode('Porteiro WhatsApp (segurança)', E0, { body: { instance: 'a', event: 'messages.upsert' } });
-ok(last.blocked === true && last.status === 429, 'porteiro WhatsApp: acima de 120/min vira 429');
-staticStore = {};
-for (let i = 0; i < 6; i++) last = await runNode('Limitar autoteste', E0, {});
-ok(last.blocked === false, 'autoteste: 6 chamadas por minuto passam');
-last = await runNode('Limitar autoteste', E0, {});
-ok(last.blocked === true && last.status === 429, 'autoteste: a 7ª chamada no minuto é limitada');
-staticStore = { mx: { sender: Date.now() } };
-const lk = await runNode('Enviar e monitorar', E0, {});
-ok(lk.skipped, 'envio: não roda em duplicidade (trava)');
-console.log('\nSEGURANÇA DO ARQUIVO COMPLETO OK');
+g = W.guardWebhook(gctx(), 'whatsapp', { headers: {}, body: { instance: 'a', event: 'x', lixo: 'x'.repeat(300 * 1024) } });
+ok(g.blocked === true && g.status === 413, 'porteiro WhatsApp: corpo gigante é recusado (413)');
+{ const c = gctx(); let last; for (let i = 0; i < 125; i++) last = W.guardWebhook(c, 'whatsapp', { headers: {}, body: { instance: 'a', event: 'messages.upsert' } });
+  ok(last.blocked === true && last.status === 429, 'porteiro WhatsApp: acima de 120/min vira 429'); }
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES DO WORKER PASSARAM');
 process.exit(fails ? 1 : 0);

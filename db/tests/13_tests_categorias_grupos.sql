@@ -48,7 +48,7 @@ begin
   perform test.fails(format($f$select public.reopen_offer(%L)$f$, v_of), 'rejeitadas');
   perform test.reset();
 
-  -- descoberta de grupos: o que o n8n sincroniza aparece, com marca de "já é destino"
+  -- descoberta de grupos: o que o worker sincroniza aparece, com marca de "já é destino"
   v_job := public.request_group_refresh('whatsapp');
   assert v_job is not null;
   assert public.request_group_refresh('whatsapp') = v_job, 'não duplica busca em andamento';

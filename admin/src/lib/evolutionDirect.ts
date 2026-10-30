@@ -1,5 +1,5 @@
 /**
- * Conexão direta do navegador com a Evolution API (sem passar pelo n8n), para gerar o QR code na hora.
+ * Conexão direta do navegador com a Evolution API (sem passar pelo worker), para gerar o QR code na hora.
  *
  * - A chave (apikey) fica só na memória/sessão desta aba; nunca é enviada ao banco por aqui.
  * - Depende de CORS: o servidor da Evolution precisa aceitar o endereço do painel (variável CORS_ORIGIN).
@@ -39,7 +39,7 @@ export function createDirectClient(baseUrl: string, apikey: string, instance: st
     try { r = await fetch(base + path, { method, headers: { apikey, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(ms) }); }
     catch (e) {
       if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw new DirectError('A Evolution não respondeu a tempo.', 'timeout');
-      throw new DirectError(`O navegador não conseguiu falar com ${base}. Ou o servidor está fora do ar, ou ele não libera o endereço deste painel (CORS). Na Evolution, defina CORS_ORIGIN com o endereço do painel (ou use o modo “Via n8n”).`, 'cors');
+      throw new DirectError(`O navegador não conseguiu falar com ${base}. Ou o servidor está fora do ar, ou ele não libera o endereço deste painel (CORS). Na Evolution, defina CORS_ORIGIN com o endereço do painel (ou use o modo “Via worker”).`, 'cors');
     }
     const text = await r.text(); let data: any = text; try { data = JSON.parse(text); } catch { /* texto */ }
     if (r.status === 401 || r.status === 403) throw new DirectError('A Evolution recusou a chave de acesso (apikey).', 'auth');

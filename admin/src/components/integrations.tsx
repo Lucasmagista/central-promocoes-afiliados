@@ -5,17 +5,17 @@ import { ago } from '../lib/format';
 import type { IntProvider, SecretInfo, SecretKey, SettingsMap } from '../lib/types';
 import { Badge, Button, useAction, useDialogs, useJob } from '../ui/ui';
 
-/** Estado mais recente de uma integração, gravado pelo n8n em settings (int_status_<provedor>). */
+/** Estado mais recente de uma integração, gravado pelo worker em settings (int_status_<provedor>). */
 export type IntStatus = Record<string, unknown> & { checked_at?: string };
 export const statusOf = (s: SettingsMap, p: IntProvider): IntStatus => ((s[`int_status_${p}`] as IntStatus | undefined) ?? {});
-export const cfgOf = <T,>(s: SettingsMap, p: 'evolution' | 'telegram' | 'n8n', fallback: T): T => ({ ...fallback, ...((s[`int_${p}`] as object | undefined) ?? {}) });
+export const cfgOf = <T,>(s: SettingsMap, p: 'evolution' | 'telegram', fallback: T): T => ({ ...fallback, ...((s[`int_${p}`] as object | undefined) ?? {}) });
 
 export function CopyBtn({ text, label = 'Copiar' }: { text: string; label?: string }) {
   const { toast } = useDialogs();
   return <Button size="sm" icon={<Copy size={13} />} onClick={async () => { try { await navigator.clipboard.writeText(text); toast('Copiado', 'ok'); } catch { toast('Não foi possível copiar. Selecione o texto e use Ctrl+C.', 'err'); } }}>{label}</Button>;
 }
 
-/** Dispara uma ação do painel (executada pelo n8n) e acompanha a tarefa até o fim. */
+/** Dispara uma ação do painel (executada pelo worker) e acompanha a tarefa até o fim. */
 export function useIntAction() {
   const { toast } = useDialogs();
   const [jobId, setJobId] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export function ActionBanner({ act, okText }: { act: IntAct; okText?: (r: Record
   if (act.running) {
     const waited = act.since ? (Date.now() - act.since) / 1000 : 0;
     return <div className="alert info" role="status"><Loader2 size={16} style={{ animation: 'sp .7s linear infinite', flex: 'none', marginTop: 2 }} />
-      <div>{act.label || 'Executando'}… aguardando o n8n.{waited > 20 && <div className="small" style={{ fontWeight: 400 }}>Está demorando. Confira se o workflow “Central — Ações do painel” está ativo no n8n (Configurações → n8n).</div>}</div></div>;
+      <div>{act.label || 'Executando'}… aguardando o worker.{waited > 20 && <div className="small" style={{ fontWeight: 400 }}>Está demorando. Confira se o worker está no ar (Configurações → Worker).</div>}</div></div>;
   }
   const j = act.job!;
   if (j.status === 'failed') return <div className="alert critical" role="alert"><XCircle size={16} style={{ flex: 'none', marginTop: 2 }} /><div>{j.last_error || 'A ação falhou.'}</div></div>;

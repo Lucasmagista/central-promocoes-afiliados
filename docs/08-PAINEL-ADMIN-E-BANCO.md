@@ -1,6 +1,6 @@
 # 08 — Painel admin, banco e permissões
 
-> Para publicação completa na Oracle, incluindo HTTPS, n8n, backup e recuperação, siga primeiro [06-IMPLANTACAO-E-ROADMAP.md](../06-IMPLANTACAO-E-ROADMAP.md). Este documento detalha as partes de banco e painel.
+> Para publicação completa na Oracle, incluindo HTTPS, worker, backup e recuperação, siga primeiro [06-IMPLANTACAO-E-ROADMAP.md](../06-IMPLANTACAO-E-ROADMAP.md). Este documento detalha as partes de banco e painel.
 
 ## O que existe
 - `db/migrations/001…011` — esquema, funções, relatórios, RLS, conversas, integrações, ações de grupo e provedores de banco.
@@ -18,7 +18,7 @@
    select public.bootstrap_admin('seu@email.com');
    ```
    Isso só funciona **enquanto não existir administrador ativo**. Novas contas ficam inativas até um admin aprovar em *Usuários*.
-5. Cole a **service_role key** apenas no n8n (credencial segura). **Nunca** no painel.
+5. Cole a **service_role key** apenas no worker (credencial segura). **Nunca** no painel.
 
 ### Testes do banco (opcional, num Postgres 16 local)
 ```bash
@@ -43,7 +43,7 @@ docker compose -f deploy/docker-compose.admin.yml --env-file deploy/admin.env up
 No Nginx Proxy Manager: novo Proxy Host → `promo-admin:80`, SSL Let's Encrypt, Force SSL. O container é somente leitura, sem capabilities extras e sem porta publicada.
 Se o Supabase for autohospedado em outro domínio, ajuste `connect-src` em `admin/nginx.conf`.
 
-## 4. O que o n8n precisa chamar (RPC com a service_role)
+## 4. O que o worker precisa chamar (RPC com a service_role)
 | Função | Quando |
 |---|---|
 | `claim_next_publication(worker)` | A cada ciclo: devolve **uma** publicação liberada (respeita pausa, modo, silêncio, limites e intervalo) ou `null` |
@@ -52,7 +52,7 @@ Se o Supabase for autohospedado em outro domínio, ajuste `connect-src` em `admi
 | `mark_publication_unknown(id, nota)` | Resposta **ambígua** (timeout depois do envio): nunca reenviar sozinho |
 | `release_stale_claims()` | A cada minuto: reserva vencida vira `unknown` |
 | `claim_destination_test()` / `complete_destination_test(id, ok, erro)` | Atende o botão "Enviar teste" dos destinos |
-| `heartbeat(serviço, status)` | A cada minuto, por serviço (n8n, evolution-api, redirecionador) |
+| `heartbeat(serviço, status)` | A cada minuto, por serviço (worker, evolution-api, redirecionador) |
 | `record_click(código, …)` | Redirecionador, a cada clique |
 | `expire_offers()` | A cada 10–15 min |
 
@@ -62,4 +62,4 @@ Se o Supabase for autohospedado em outro domínio, ajuste `connect-src` em `admi
 - **Leitor**: somente consulta.
 O banco aplica as mesmas regras (RLS e checagem dentro das funções); esconder botões no painel é só conforto.
 
-> Atalho: na raiz do projeto use `npm run demo`, `npm test`, `npm run check` e `npm run n8n:test` (ver doc 09).
+> Atalho: na raiz do projeto use `npm run demo`, `npm test`, `npm run check` e `npm run worker:test` (ver doc 09).

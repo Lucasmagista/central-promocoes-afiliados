@@ -36,9 +36,9 @@ const until = (p, re, t = 15000) => p.waitForFunction((s) => new RegExp(s, 'i').
   await p.getByLabel(/Sem câmera/).fill('11999990001'); await p.getByRole('button', { name: 'Gerar código' }).click();
   await p.waitForSelector('.paircode', { timeout: 15000 }); ok(true, 'código de pareamento exibido');
   await p.locator('.statushero .badge', { hasText: /^Conectado$/ }).waitFor({ timeout: 20000 }); ok(await p.locator('.qrbox').count() === 0, 'conectou: QR some'); ok(await p.getByText('+5511999990001').count() > 0, 'número conectado exibido');
-  await p.getByLabel('Endereço do webhook no n8n').fill('http://inseguro.com/x'); await p.getByRole('button', { name: 'Salvar' }).first().click();
+  await p.getByLabel('Endereço do webhook').fill('http://inseguro.com/x'); await p.getByRole('button', { name: 'Salvar' }).first().click();
   await until(p, /https/); ok(true, 'webhook http é recusado');
-  await p.getByLabel('Endereço do webhook no n8n').fill('https://n8n.exemplo.com.br/webhook/central-whatsapp-x9Zq'); await p.getByRole('button', { name: 'Salvar' }).first().click(); await until(p, /Configuração do WhatsApp salva/);
+  await p.getByLabel('Endereço do webhook').fill('https://worker.exemplo.com.br/hook/whatsapp-x9Zq'); await p.getByRole('button', { name: 'Salvar' }).first().click(); await until(p, /Configuração do WhatsApp salva/);
   await p.getByRole('button', { name: 'Configurar webhook' }).click(); await until(p, /Webhook configurado na Evolution/); ok(true, 'webhook configurado');
   await p.getByLabel('Espera mínima entre mensagens (s)').fill('20'); await p.getByRole('button', { name: 'Salvar' }).nth(1).click(); await until(p, /Intervalo|mínimo/); ok(true, 'espera mínima maior que a máxima é recusada');
   await p.getByLabel('Espera mínima entre mensagens (s)').fill('5');
@@ -51,17 +51,17 @@ const until = (p, re, t = 15000) => p.waitForFunction((s) => new RegExp(s, 'i').
   await p.getByLabel('Token do bot').fill('123456789:' + 'A'.repeat(35)); await p.getByRole('button', { name: 'Guardar' }).click(); await until(p, /guardada/); ok(true, 'token guardado');
   await p.getByRole('switch', { name: 'Telegram ativo' }).click(); await p.getByRole('button', { name: 'Salvar' }).first().click(); await until(p, /Configuração do Telegram salva/);
   await p.getByRole('button', { name: 'Verificar bot' }).click(); await until(p, /@central_ofertas_bot/); ok(true, 'bot verificado');
-  await p.getByRole('button', { name: 'Webhook', exact: true }).click(); await p.getByLabel('Endereço do webhook no n8n').fill('https://n8n.exemplo.com.br/webhook/central-telegram-x9Zq');
+  await p.getByRole('button', { name: 'Webhook', exact: true }).click(); await p.getByLabel('Endereço do webhook').fill('https://worker.exemplo.com.br/hook/telegram-x9Zq');
   await p.getByRole('button', { name: 'Gerar segredo' }).click(); await until(p, /gerado/); ok(true, 'segredo do webhook gerado');
   await p.getByRole('button', { name: 'Salvar' }).first().click(); await until(p, /Configuração do Telegram salva/);
   await p.getByRole('button', { name: /Registrar webhook/ }).click(); await until(p, /Webhook registrado no Telegram/); ok(true, 'webhook do Telegram registrado');
   await p.getByPlaceholder('@meu_canal').fill('@meu_canal'); await p.getByRole('button', { name: 'Enviar teste' }).click(); await until(p, /Mensagem enviada/); ok(true, 'teste de envio Telegram');
   await p.screenshot({ path: S + '/i_telegram.png', fullPage: true });
 
-  // ---------- n8n, regras
-  await tab('n8n'); ok(await p.getByText('00-central-completo.json').count() > 0 && await p.getByText('N8N_BLOCK_ENV_ACCESS_IN_NODE=false').count() > 0, 'n8n: workflows e variáveis');
-  await p.getByRole('button', { name: 'Rodar autoteste' }).click(); await p.getByText('Tudo que é obrigatório está certo.').waitFor({ timeout: 12000 }); ok(true, 'n8n: autoteste mostra resultado');
-  await p.screenshot({ path: S + '/i_n8n.png', fullPage: true });
+  // ---------- worker, regras
+  await tab('Worker'); ok(await p.getByText('SUPABASE_SERVICE_ROLE_KEY=cole_a_service_role_aqui').count() > 0, 'worker: variáveis de ambiente');
+  await p.getByRole('button', { name: 'Rodar autoteste' }).click(); await p.getByText('Tudo que é obrigatório está certo.').waitFor({ timeout: 12000 }); ok(true, 'worker: autoteste mostra resultado');
+  await p.screenshot({ path: S + '/i_worker.png', fullPage: true });
   await tab('Regras'); ok(await p.getByText('Termos proibidos').count() > 0, 'regras de publicação');
   await tab('Avançado'); ok(await p.getByText('Fuso horário').count() > 0, 'avançado');
   await p.goto(B + 'configuracoes?aba=whatsapp'); await p.waitForSelector('.setnav'); ok(await p.locator('.setnav button[aria-current=page]', { hasText: 'WhatsApp' }).count() === 1, 'aba aparece na URL');

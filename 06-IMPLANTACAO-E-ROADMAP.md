@@ -1,17 +1,17 @@
 # 06 — Implantação, operação e recuperação
 
-Este guia publica o painel e o n8n na Oracle Cloud, mantendo o Supabase gerenciado. Execute primeiro em ambiente de teste; produção começa em simulação.
+Este guia publica o painel e o worker na Oracle Cloud, mantendo o Supabase gerenciado. Execute primeiro em ambiente de teste; produção começa em simulação.
 
 ## 1. Pré-requisitos
 
-- domínio para o painel, como `promocoes.seudominio.com.br`, e outro para n8n;
+- domínio para o painel, como `promocoes.seudominio.com.br`, e outro para worker;
 - Oracle com Docker Engine e Docker Compose plugin instalados;
 - proxy reverso HTTPS já funcional na rede Docker externa `proxy`;
 - projeto Supabase de produção dedicado;
 - Node 20 LTS em máquina de desenvolvimento para validar e gerar workflows;
 - conta administrativa para Supabase, Telegram e Evolution API.
 
-Não exponha portas de Postgres, n8n ou Evolution diretamente à internet. Exponha só 80/443 pelo proxy; o editor do n8n deve exigir autenticação forte e, preferencialmente, acesso por VPN ou IP permitido.
+Não exponha portas de Postgres, worker ou Evolution diretamente à internet. Exponha só 80/443 pelo proxy; o editor do worker deve exigir autenticação forte e, preferencialmente, acesso por VPN ou IP permitido.
 
 ## 2. Preparar e validar o pacote
 
@@ -20,8 +20,7 @@ Na cópia que será publicada:
 ```powershell
 npm run setup
 npm run check
-npm run n8n:build
-npm run n8n:test
+npm run worker:test
 ```
 
 Copie apenas os arquivos do projeto. Não inclua `.env`, `node_modules`, sessões do WhatsApp, dumps nem a pasta `_to_delete` no artefato de produção. Versione o projeto em Git antes do primeiro deploy para que a versão publicada seja rastreável.
@@ -59,25 +58,22 @@ No proxy, crie um host HTTPS apontando para `promo-admin:80`, force HTTPS e habi
 
 Valide no navegador: login, carregamento das páginas, ausência de erros de CSP e a URL correta do Supabase. Configure domínio e redirecionamentos permitidos no Supabase Auth para o endereço final do painel.
 
-## 5. Configurar n8n
+## 5. Configurar o worker
 
-Hospede n8n em domínio separado, por exemplo `n8n.seudominio.com.br`. Armazene no ambiente do serviço somente:
+O worker (`deploy/worker`) é um processo Node sem dependências que executa as tarefas do painel, publica as ofertas aprovadas, recebe os webhooks da Evolution e do Telegram e coleta ofertas das lojas. No servidor, crie `deploy/worker/worker.env` (fora do Git):
 
 ```dotenv
 SUPABASE_URL=https://SEU-PROJETO.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=VALOR_PRIVADO
-NODE_FUNCTION_ALLOW_BUILTIN=crypto
 ```
 
-Use credencial persistente do n8n, banco interno com backup e `N8N_ENCRYPTION_KEY` mantida em cofre. A `service_role` dá acesso integral ao Supabase: não a adicione ao painel, a workflows exportados, ao frontend ou a logs.
-
-Depois de `npm run n8n:build`, importe e ative os quatro JSON em `deploy/n8n/`. Troque os caminhos de webhook que contêm `TROQUE-ESTE-TEXTO` por valores longos, aleatórios e diferentes. Copie a Production URL resultante para o painel; não use URL de teste.
+A `service_role` dá acesso integral ao Supabase: não a adicione ao painel, ao frontend, a logs ou ao repositório. Suba com `./deploy/servidor/atualizar.sh --force` (ou `deploy/servidor/subir.ps1`, no seu computador). Os endereços de webhook aparecem em `docker logs promo-worker`: a Evolution usa o interno (`http://promo-worker:8787/hook/whatsapp-…`) e o Telegram precisa de um https público (host no proxy apontando para `promo-worker:8787`).
 
 ### Atualização de banco pelo painel
 
 A primeira aplicação de `011_database_providers.sql` é manual e cria o histórico de versões. Depois, em **Configurações → Banco de dados**, informe o `project ref`, escolha **Pelo worker** e guarde um token da Management API com escopo mínimo `database_read` e `database_write`. O valor fica somente no cofre de segredos; a tela mostra apenas se está configurado. O botão aplica somente arquivos posteriores aos já registrados. Faça backup e revise o SQL antes de solicitar uma atualização.
 
-Confira no painel o heartbeat do n8n. Simule uma ação e confirme que ela percorre `channel_jobs` sem chamar um canal real.
+Confira no painel o heartbeat do worker. Simule uma ação e confirme que ela percorre `channel_jobs` sem chamar um canal real.
 
 ## 6. Homologar integrações
 
@@ -90,7 +86,7 @@ Mantenha o modo revisão durante o piloto. Use limites baixos, acompanhe `unknow
 
 ## 7. Rotina operacional
 
-Diariamente, acompanhe painel de saúde, fila pendente, `unknown`, falhas permanentes, conversas e espaço de disco. Semanalmente, revise logs sanitizados, atualizações do n8n/Evolution e configurações de conectores. Mensalmente, teste um backup/restauração, revise acesso de usuários e confirme termos dos programas de afiliados.
+Diariamente, acompanhe painel de saúde, fila pendente, `unknown`, falhas permanentes, conversas e espaço de disco. Semanalmente, revise logs sanitizados, atualizações do worker/Evolution e configurações de conectores. Mensalmente, teste um backup/restauração, revise acesso de usuários e confirme termos dos programas de afiliados.
 
 ## 8. Recuperação
 
@@ -98,10 +94,10 @@ Para incidente de integração, pause publicações pelo painel e preserve regis
 
 ## Checklist de liberação
 
-- [ ] `npm run check` e `npm run n8n:test` concluídos.
+- [ ] `npm run check` e `npm run worker:test` concluídos.
 - [ ] Migrações 001–011 aplicadas e registradas.
 - [ ] Painel HTTPS, com `healthz` respondendo.
-- [ ] n8n HTTPS, autenticado, com backup e `service_role` fora do navegador.
+- [ ] worker HTTPS, autenticado, com backup e `service_role` fora do navegador.
 - [ ] Primeiro administrador validado e cadastro público decidido.
 - [ ] Webhooks com segredo/autenticação e URLs de produção.
 - [ ] Telegram e WhatsApp testados em destinos privados.

@@ -24,7 +24,7 @@ export default function Health() {
         <Card title="Serviços (heartbeat)" flush>{d.heartbeats.length ? <div className="tablewrap"><table><tbody>{d.heartbeats.map((h) => (
           <tr key={h.service}><td style={{ width: 30 }}>{hbIcon(h.status)}</td><td><b>{h.service}</b></td><td className="small muted">visto {ago(h.last_seen)}</td>
             <td><Badge tone={h.age_seconds > 300 ? 'bad' : h.status === 'ok' ? 'ok' : 'warn'}>{h.age_seconds > 300 ? 'sem sinal' : h.status}</Badge></td></tr>))}</tbody></table></div> :
-          <div className="empty">Nenhum serviço reportou ainda. Os workflows do n8n enviam o heartbeat a cada minuto (Fase 2).</div>}</Card>
+          <div className="empty">Nenhum serviço reportou ainda. Os o worker envia o heartbeat a cada minuto (Fase 2).</div>}</Card>
         <Card title="Verificações">
           <div className="col" style={{ gap: 12 }}>{checks.map((c) => <div key={c.label} className="row">{c.ok ? <CheckCircle2 size={18} color="var(--ok)" /> : <AlertTriangle size={18} color="var(--warn)" />}<div><div style={{ fontWeight: 600 }}>{c.label}</div><div className="small muted">{c.detail}</div></div></div>)}</div></Card>
       </div>

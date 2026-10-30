@@ -117,7 +117,7 @@ export default function Messenger({ channel, full }: { channel: Channel; full?: 
           </div>
           <div className="items">
             {list.loading && !list.data ? <Loading /> : list.error ? <div style={{ padding: 12 }}><ErrorBox error={list.error} retry={list.reloadLoud} /></div> : chats.length === 0 ?
-              <Empty icon={<MessageCircle size={28} />}>{archived ? 'Nenhuma conversa arquivada.' : unreadOnly ? 'Nada não lido. Bom sinal.' : 'Nenhuma conversa ainda. Elas aparecem quando o n8n começar a enviar os webhooks.'}</Empty> :
+              <Empty icon={<MessageCircle size={28} />}>{archived ? 'Nenhuma conversa arquivada.' : unreadOnly ? 'Nada não lido. Bom sinal.' : 'Nenhuma conversa ainda. Elas aparecem quando o worker começar a enviar os webhooks.'}</Empty> :
               chats.map((c) => (
                 <div key={c.id} className="citem" role="button" tabIndex={0} aria-current={c.id === selId} onClick={() => pick(c.id)} onKeyDown={(e) => e.key === 'Enter' && pick(c.id)}>
                   <Avatar name={c.title} square={c.kind !== 'private'} />
@@ -198,7 +198,7 @@ export default function Messenger({ channel, full }: { channel: Channel; full?: 
             </section>
             {chat.kind !== 'private' && <section>
               <h3 className="row"><Hash size={15} />Participantes</h3>
-              {(detail.data?.participants.length ?? 0) === 0 ? <p className="small muted" style={{ margin: '8px 0 0' }}>A lista completa ainda não foi sincronizada pelo n8n.</p> : <>
+              {(detail.data?.participants.length ?? 0) === 0 ? <p className="small muted" style={{ margin: '8px 0 0' }}>A lista completa ainda não foi sincronizada pelo worker.</p> : <>
                 <input aria-label="Buscar participante" placeholder="Buscar participante" style={{ margin: '10px 0' }} value={pq} onChange={(e) => setPq(e.target.value)} />
                 <div className="col" style={{ gap: 8, maxHeight: 260, overflow: 'auto' }}>{people.map((p) => <div key={p.external_id} className="row"><Avatar name={p.display_name ?? p.external_id} size="sm" />
                   <span className="truncate" style={{ flex: 1 }}>{p.display_name ?? p.external_id}</span>{p.role !== 'member' && <Badge tone={p.role === 'owner' ? 'ok' : 'info'}>{p.role === 'owner' ? 'dono' : 'admin'}</Badge>}</div>)}
