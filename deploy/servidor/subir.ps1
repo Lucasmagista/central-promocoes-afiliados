@@ -12,7 +12,8 @@ param(
   [string]$Pasta = "/mnt/data/apps/central-promocoes",
   [switch]$SemTestes, [switch]$SoServidor, [switch]$Forcar
 )
-$ErrorActionPreference = "Stop"
+# Os avisos do git/ssh vao para o stderr: com "Stop" o PowerShell 5.1 os trataria como erro. Os codigos de saida sao checados a mao.
+$ErrorActionPreference = "Continue"
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot "..\.."))
 function Passo($t) { Write-Host "`n== $t" -ForegroundColor Cyan }
 function Roda($cmd) { & cmd /c $cmd; if ($LASTEXITCODE -ne 0) { throw "Falhou: $cmd" } }
@@ -37,6 +38,6 @@ if (-not $SoServidor) {
 
 Passo "Atualizando o servidor ($Servidor)"
 $flag = ""; if ($Forcar) { $flag = "--force" }
-ssh -o BatchMode=yes $Servidor "cd $Pasta && ./deploy/servidor/atualizar.sh $flag; echo; tail -n 6 deploy/servidor/atualizar.log; echo; docker ps --filter name=promo- --format '{{.Names}}: {{.Status}}'"
+ssh -o BatchMode=yes $Servidor "cd $Pasta && bash ./deploy/servidor/atualizar.sh $flag; echo; tail -n 6 deploy/servidor/atualizar.log; echo; docker ps --filter name=promo- --format '{{.Names}}: {{.Status}}'"
 if ($LASTEXITCODE -ne 0) { throw "A atualizacao no servidor falhou. Veja: ssh $Servidor tail -n 50 $Pasta/deploy/servidor/atualizar.log" }
 Write-Host "`nPronto." -ForegroundColor Green
