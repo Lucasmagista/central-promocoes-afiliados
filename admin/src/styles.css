@@ -311,6 +311,8 @@ a.pulse:hover{background:var(--surface-2);text-decoration:none}
 .kcard:hover{border-color:var(--ink)}.kcard[aria-grabbed=true]{opacity:.45}
 .kcard .t{font-weight:650;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .kempty{color:var(--muted);font-size:13px;text-align:center;padding:22px 8px}
+.kchan{display:flex;flex-direction:column;gap:9px}.kchan+.kchan{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.kchanhead{display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:1;background:var(--surface-3);padding:2px 0}
 .cal{display:flex;gap:2px;align-items:flex-end;height:46px}.cal i{flex:1;background:var(--tag);border-radius:2px 2px 0 0;min-height:2px}
 .diff-add{background:var(--ok-soft);display:block}.diff-del{background:var(--bad-soft);display:block;text-decoration:line-through;opacity:.8}
 .tplpick{display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:var(--r-sm);padding:8px 14px;font:inherit;cursor:pointer;min-width:150px}

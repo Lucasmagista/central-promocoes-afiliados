@@ -5,13 +5,13 @@ import { api } from '../lib/api';
 import { ProductImage } from '../ui/ProductImage';
 import { useSession } from '../session';
 import { money, ago, pct, platformName } from '../lib/format';
-import { Badge, Button, Card, Empty, ErrorBox, Kbd, Loading, PageHead, PriceTag, useAction, useDialogs, useHotkeys, useLoad } from '../ui/ui';
-import { PlatformTag, Score } from '../ui/badges';
+import { Badge, Button, Card, Empty, ErrorBox, Kbd, Loading, PageHead, PriceTag, Seg, useAction, useDialogs, useHotkeys, useLoad } from '../ui/ui';
+import { ChannelTag, PlatformTag, PubStatus, Score } from '../ui/badges';
 import { AffiliateLinkForm, ApproveModal, PreviewPane } from '../components/Approve';
 import { OfferDrawer } from '../components/OfferDrawer';
 import { CatIcon } from '../components/CategoryPicker';
 import { DEFAULT_CATEGORIES, categorySlug } from '../lib/categories';
-import type { Offer, Platform } from '../lib/types';
+import type { Channel, Offer, Platform, Publication } from '../lib/types';
 
 type ColId = 'review' | 'queue' | 'published' | 'rejected';
 const COLS: { id: ColId; title: string; hint: string; statuses: Offer['status'][] }[] = [
@@ -39,6 +39,10 @@ function Board({ onChanged }: { onChanged: () => void }) {
   const [cat, setCat] = useState('all');
   const [text, setText] = useState('');
   const [minScore, setMinScore] = useState(0);
+  const [chan, setChan] = useState<'all' | Channel>('all');
+  // para cada oferta aprovada/publicada: o que está indo (ou já foi) para cada canal e grupo
+  const pubsQ = useLoad(() => api().listPublications({ status: 'all' }), [], 20000);
+  const pubsByOffer = useMemo(() => { const m = new Map<string, Publication[]>(); for (const p of pubsQ.data ?? []) { if (p.status === 'cancelled') continue; const l = m.get(p.offer_id); if (l) l.push(p); else m.set(p.offer_id, [p]); } return m; }, [pubsQ.data]);
   const [drag, setDrag] = useState<Offer | null>(null);
   const [over, setOver] = useState<ColId | null>(null);
   const [approving, setApproving] = useState<Offer | null>(null);
@@ -49,7 +53,7 @@ function Board({ onChanged }: { onChanged: () => void }) {
   const filtered = useMemo(() => all.filter((o) => (plat === 'all' || o.platform === plat) && (cat === 'all' || (categorySlug(o.category, cats) ?? 'outros') === cat)
     && (o.score ?? 0) >= minScore && (!t || o.title.toLowerCase().includes(t))), [all, plat, cat, minScore, t, cats]);
   const colOf = (o: Offer): ColId | null => COLS.find((c) => c.statuses.includes(o.status))?.id ?? null;
-  const refresh = async () => { await q.reload(); onChanged(); };
+  const refresh = async () => { await Promise.all([q.reload(), pubsQ.reload()]); onChanged(); };
 
   const reject = async (o: Offer) => {
     const r = await prompt({ title: 'Rejeitar oferta', label: 'Motivo da rejeição', required: true, multiline: true, confirmLabel: 'Rejeitar' });
@@ -67,6 +71,26 @@ function Board({ onChanged }: { onChanged: () => void }) {
     if (from === 'rejected' && to === 'review') return void reopen(o);
     toast('Movimento não permitido. Só dá para aprovar/rejeitar o que está em revisão ou reabrir o que foi rejeitado.', 'err');
   };
+  /** Aprovadas e Publicadas ficam separadas por canal (Telegram | WhatsApp): cada canal tem a sua fila e sai ao mesmo tempo que o outro. */
+  const renderLanes = (col: ColId, items: Offer[]) => {
+    const pick = (o: Offer, ch: Channel) => (pubsByOffer.get(o.id) ?? []).filter((p) => p.channel === ch && (col === 'queue' ? p.status !== 'sent' : p.status === 'sent'));
+    const lanes = (['telegram', 'whatsapp'] as Channel[]).filter((ch) => chan === 'all' || chan === ch);
+    const orphans = chan === 'all' ? items.filter((o) => !(['telegram', 'whatsapp'] as Channel[]).some((ch) => pick(o, ch).length)) : [];
+    const head = (o: Offer) => <>
+      <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}><Score v={o.score} /><ProductImage src={o.image_url} size={40} /><button className="ktitle" onClick={() => setDetail(o.id)} title="Abrir detalhes">{o.title}</button></div>
+      <div className="row wrap small" style={{ gap: 8 }}><b>{money(o.current_price)}</b>{o.discount_pct != null && <span className="up">-{o.discount_pct}%</span>}<PlatformTag p={o.platform} /><span className="muted">{ago(o.price_observed_at)}</span></div></>;
+    return <>
+      {lanes.map((ch) => { const rows = items.map((o) => ({ o, ps: pick(o, ch) })).filter((r) => r.ps.length);
+        return <div key={ch} className="kchan"><div className="kchanhead"><ChannelTag c={ch} /><span className="kcount">{rows.length}</span><span className="small muted">{col === 'queue' ? 'saem neste canal' : 'enviadas neste canal'}</span></div>
+          {rows.length === 0 ? <div className="small muted kempty">Nada em {ch === 'telegram' ? 'Telegram' : 'WhatsApp'}.</div> : rows.map(({ o, ps }) =>
+            <article key={o.id + ch} className="kcard" style={{ cursor: 'default' }}>{head(o)}
+              <div className="col" style={{ gap: 4 }}>{ps.map((p) => <div key={p.id} className="row small" style={{ gap: 6, justifyContent: 'space-between' }}><span className="truncate" title={p.destination_name}>{p.destination_name}</span><PubStatus s={p.status} /></div>)}</div>
+            </article>)}</div>; })}
+      {orphans.length > 0 && <div className="kchan"><div className="kchanhead"><b>Sem destino carregado</b><span className="kcount">{orphans.length}</span></div>
+        {orphans.map((o) => <article key={o.id} className="kcard" style={{ cursor: 'default' }}>{head(o)}</article>)}</div>}
+      {lanes.length > 0 && items.length === 0 && <div className="small muted kempty">Nada aqui.</div>}
+    </>;
+  };
   const allowed = (o: Offer | null, to: ColId) => { if (!o) return false; const f = colOf(o); return (f === 'review' && (to === 'queue' || to === 'rejected')) || (f === 'rejected' && to === 'review'); };
 
   return <>
@@ -77,6 +101,7 @@ function Board({ onChanged }: { onChanged: () => void }) {
         <select aria-label="Plataforma" value={plat} onChange={(e) => setPlat(e.target.value as Platform | 'all')}><option value="all">Todas as plataformas</option>{Object.entries(platformName).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
         <select aria-label="Tipo de produto" value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">Todos os tipos</option>{cats.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}</select>
         <label className="row small muted">Score ≥ <input aria-label="Score mínimo" type="number" min={0} max={100} style={{ width: 70, minWidth: 0 }} value={minScore} onChange={(e) => setMinScore(Number(e.target.value) || 0)} /></label>
+        <Seg value={chan} onChange={setChan} options={[{ v: 'all', label: 'Todos os canais' }, { v: 'telegram', label: 'Telegram' }, { v: 'whatsapp', label: 'WhatsApp' }]} />
         {canOperate && <span className="small muted right">Arraste: <b>Para revisar → Aprovadas / Rejeitadas</b> · <b>Rejeitadas → Para revisar</b></span>}
       </div>
     </Card>
@@ -87,7 +112,7 @@ function Board({ onChanged }: { onChanged: () => void }) {
         return <section key={c.id} className="kcol" data-over={over === c.id && ok} data-ok={drag ? ok : undefined} aria-label={c.title}
           onDragOver={(e) => { if (ok) { e.preventDefault(); setOver(c.id); } }} onDragLeave={() => setOver((x) => (x === c.id ? null : x))} onDrop={(e) => { e.preventDefault(); drop(c.id); }}>
           <header><b>{c.title}</b><span className="kcount">{items.length}</span><div className="small muted">{c.hint}</div></header>
-          <div className="kbody">{items.length === 0 ? <div className="small muted kempty">Nada aqui.</div> : items.map((o) =>
+          <div className="kbody">{(c.id === 'queue' || c.id === 'published') ? renderLanes(c.id, items) : items.length === 0 ? <div className="small muted kempty">Nada aqui.</div> : items.map((o) =>
             <article key={o.id} className="kcard" draggable={canOperate && (c.id === 'review' || c.id === 'rejected')} onDragStart={() => setDrag(o)} onDragEnd={() => { setDrag(null); setOver(null); }}
               data-dragging={drag?.id === o.id}>
               <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}><Score v={o.score} /><ProductImage src={o.image_url} size={40} /><button className="ktitle" onClick={() => setDetail(o.id)} title="Abrir detalhes">{o.title}</button></div>

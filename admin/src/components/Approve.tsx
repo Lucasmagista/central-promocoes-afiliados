@@ -35,6 +35,8 @@ export function ApproveModal({ offer, onClose, onDone }: { offer: Offer; onClose
   const list = dests.data ?? [];
   useEffect(() => { if (dests.data) setSel(dests.data.filter((d) => eligible(offer, d)).map((d) => d.id)); }, [dests.data, offer]);
   const chosen = list.filter((d) => sel.includes(d.id));
+  const channels = (['telegram', 'whatsapp'] as const).map((ch) => { const all = list.filter((d) => d.channel === ch && eligible(offer, d)); return { ch, all, on: all.filter((d) => sel.includes(d.id)).length }; }).filter((x) => x.all.length > 0);
+  const toggleChannel = (ch: 'telegram' | 'whatsapp', on: boolean) => { const ids = list.filter((d) => d.channel === ch && eligible(offer, d)).map((d) => d.id); setSel(on ? Array.from(new Set([...sel, ...ids])) : sel.filter((x) => !ids.includes(x))); };
   const noLink = !offer.affiliate_url;
   return (
     <Modal wide title="Aprovar oferta" onClose={onClose}
@@ -47,6 +49,10 @@ export function ApproveModal({ offer, onClose, onDone }: { offer: Offer; onClose
         {noLink && <div className="alert warning"><AlertTriangle size={16} style={{ flex: 'none', marginTop: 2 }} />Esta oferta não tem link de afiliado. Informe o link antes de aprovar.</div>}
         <div>
           <div className="small muted" style={{ marginBottom: 6, fontWeight: 600 }}>Destinos</div>
+          {channels.length > 0 && <div className="row wrap" style={{ gap: 8, marginBottom: 8 }}>{channels.map((x) => { const full = x.on === x.all.length;
+            return <label key={x.ch} className="row" style={{ gap: 6, border: '1px solid var(--line)', borderRadius: 99, padding: '3px 10px' }}><input type="checkbox" checked={full} ref={(el) => { if (el) el.indeterminate = x.on > 0 && !full; }} onChange={(e) => toggleChannel(x.ch, e.target.checked)} />
+              <ChannelTag c={x.ch} /><span className="small muted">{x.on}/{x.all.length} grupo(s)</span></label>; })}
+            <span className="small muted">Cada canal sai ao mesmo tempo, com o seu próprio ritmo e limites.</span></div>}
           <div className="col" style={{ gap: 6 }}>
             {list.map((d) => { const ok = eligible(offer, d); return (
               <label key={d.id} className="row" style={{ opacity: ok ? 1 : .5 }}>

@@ -192,7 +192,8 @@ const rpc = async (name, args) => {
     case 'complete_channel_job': { const j = db.jobs.find((x) => x.id === args.p_id); j.status = 'done'; j.result = args.p_result; return null; }
     case 'fail_channel_job': { const j = db.jobs.find((x) => x.id === args.p_id); j.status = 'failed'; j.error = args.p_error; return null; }
     case 'report_integration_status': db.status[args.p_provider] = { ...args.p_status, checked_at: 'agora' }; return null;
-    case 'claim_next_publication': return db.pubs.shift() || null;
+    case 'claim_next_publication': { const i = db.pubs.findIndex((p) => !args.p_channel || p.channel === args.p_channel); return i < 0 ? null : db.pubs.splice(i, 1)[0]; }
+    case 'reshorten_pending': return 0;
     case 'complete_publication': db.pubResults.push(['sent', args.p_id, args.p_external_message_id]); return null;
     case 'fail_publication': db.pubResults.push(['failed', args.p_id, args.p_error_code, args.p_permanent, args.p_retry_in_seconds]); return 'x';
     case 'mark_publication_unknown': db.pubResults.push(['unknown', args.p_id, args.p_note]); return null;

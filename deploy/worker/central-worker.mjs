@@ -904,9 +904,12 @@ export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) 
     await ctx.rpc('complete_destination_test', { p_test: t.test_id, p_ok: !!r.ok, p_error: r.ok ? null : r.error });
     if (r.ok) sent++; else failed++;
   }
-  // 2) publicações de ofertas
+  // 2) publicações de ofertas: uma "pista" por canal, rodando ao mesmo tempo. A espera entre mensagens do WhatsApp
+  //    (proteção do número) não atrasa o Telegram, e cada grupo segue com o seu próprio limite e intervalo.
+  await ctx.rpc('reshorten_pending', {}).catch(() => {}); // ofertas aprovadas antes do link curto ganham o link curto
+  const lane = async (channel) => {
   for (let i = 0; i < maxPerRun && left() > 8000; i++) {
-    const p = await ctx.rpc('claim_next_publication', { p_worker: 'worker' }); if (!p) break;
+    const p = await ctx.rpc('claim_next_publication', { p_worker: 'worker-' + channel, p_channel: channel }); if (!p) break;
     if (p.is_simulated) { await ctx.rpc('complete_publication', { p_id: p.publication_id, p_external_message_id: 'simulado-' + String(p.publication_id).slice(0, 8) }); sent++; continue; }
     {
       const pc = await ctx.rpc('get_publication_context', { p_pub: p.publication_id }).catch(() => null);
@@ -921,6 +924,8 @@ export async function runSender(ctx, { budgetMs = 50000, maxPerRun = 20 } = {}) 
     else { await ctx.rpc('fail_publication', { p_id: p.publication_id, p_error_code: r.code, p_permanent: !!r.permanent, p_retry_in_seconds: r.retryIn ?? null }); failed++; if (r.code === 'rate') break; }
     if (p.channel === 'whatsapp') await ctx.sleep(Math.min(pickDelay(ctx, rt.evolution), Math.max(0, left() - 4000)));
   }
+  };
+  await Promise.all([lane('telegram'), lane('whatsapp')]);
   // 3) respostas manuais das conversas
   for (let i = 0; i < 5 && left() > 8000; i++) {
     const m = await ctx.rpc('claim_chat_outbox', { p_worker: 'worker' }); if (!m) break;
