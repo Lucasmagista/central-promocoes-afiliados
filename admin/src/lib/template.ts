@@ -3,7 +3,8 @@ import { money } from './format';
 
 /** Variáveis disponíveis nos templates. O texto FINAL é sempre gerado no banco (render_offer_text). */
 export const TEMPLATE_VARS: { name: string; help: string }[] = [
-  { name: 'title', help: 'Título do produto' },
+  { name: 'title', help: 'Nome curto do produto (até 70 caracteres, como nos canais de ofertas)' },
+  { name: 'full_title', help: 'Título completo, como vem da loja' },
   { name: 'price', help: 'Preço atual (R$)' },
   { name: 'previous_line', help: 'Linha "Antes: R$ x (-y%)" — só existe com preço anterior confiável' },
   { name: 'coupon_line', help: 'Linha de cupom — só existe se confirmado' },
@@ -13,6 +14,18 @@ export const TEMPLATE_VARS: { name: string; help: string }[] = [
   { name: 'category', help: 'Categoria' },
   { name: 'seller', help: 'Vendedor' },
 ];
+
+/** Nome curto: mesma regra do banco (short_title). Corta em separador ou palavra inteira, sem terminar em "de", "para"... */
+export function shortTitle(title: string, max = 70): string {
+  const t = (title ?? '').replace(/\s+/g, ' ').trim(); const m = Math.max(max, 20);
+  if (t.length <= m) return t;
+  let cut = t[m] === ' ' ? t.slice(0, m) : t.slice(0, m).replace(/\s+\S*$/, '');
+  const sep = cut.replace(/\s*[,;|]\s*[^,;|]*$/, '');
+  if (sep !== cut && sep.length >= m * 0.55) cut = sep;
+  for (let i = 0; i < 4; i++) cut = cut.replace(/[\s,;:|/+&-]+$/, '').replace(/\s+(de|da|do|das|dos|para|pra|com|e|em|p\/|c\/|a|o|ou|no|na|por)$/i, '');
+  if ((cut.match(/\(/g) ?? []).length > (cut.match(/\)/g) ?? []).length) cut = cut.replace(/\([^)]*$/, '').trim();
+  return cut.length < 3 ? t.slice(0, m) : cut;
+}
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -40,7 +53,7 @@ export function renderTemplate(body: string, channel: Channel, ctx: RenderContex
     timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
   }).replace(',', ' às');
   const vars: Record<string, string> = {
-    title: o.title, price: money(o.current_price), previous_line: previousLine,
+    title: shortTitle(o.title), full_title: o.title, price: money(o.current_price), previous_line: previousLine,
     coupon_line: o.coupon_code && o.coupon_confirmed ? `Cupom: ${o.coupon_code}` : '',
     observed_at: observed, url, disclosure: ctx.disclosure, category: o.category ?? '', seller: o.seller_name ?? '',
   };

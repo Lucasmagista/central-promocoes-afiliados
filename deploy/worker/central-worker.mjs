@@ -137,6 +137,8 @@ function groupApi(call) {
 }
 const waParticipant = (p) => { const id = p && (p.phoneNumber || p.id || p.jid || p); const ph = jidPhone(p && p.phoneNumber || id) || digits(id); return ph ? { external_id: ph, display_name: '+' + ph, role: p && (p.admin === 'admin' || p.admin === 'superadmin' || p.isAdmin) ? 'admin' : 'member' } : null; };
 const toDataUrl = (b64) => { if (typeof b64 !== 'string' || !b64) return null; if (b64.startsWith('data:image/')) return b64.length < 400000 ? b64 : null; return /^[A-Za-z0-9+/=]+$/.test(b64) && b64.length < 400000 ? 'data:image/png;base64,' + b64 : null; };
+// tamanho como o Telegram conta a legenda: sem as marcas HTML (o endereço do link fica no atributo href)
+export const visibleLength = (t) => String(t || '').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&').length;
 const httpErr = (who, r) => {
   const txt = msgOf(r.data); const dead = who === 'evolution' && /connection closed/i.test(JSON.stringify(r.data || {}));
   const e = new Error(dead ? 'A sessão do WhatsApp travou na Evolution (Connection Closed). Em Configurações → WhatsApp clique em Desconectar e leia o QR de novo.' : `${who} respondeu HTTP ${r.status}${txt ? ': ' + txt : ''}`);
@@ -189,7 +191,7 @@ export function telegramClient(ctx, token, apiBase) {
     updates: (offset) => call('getUpdates', { offset, timeout: 0, limit: 100, allowed_updates: ['message', 'channel_post', 'my_chat_member'] }, 20000),
     async send(chatId, text, imageUrl) {
       try {
-        const r = imageUrl && text.length <= 1024 ? await call('sendPhoto', { chat_id: chatId, photo: imageUrl, caption: text, parse_mode: 'HTML' }, 40000) : await call('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML' });
+        const r = imageUrl && visibleLength(text) <= 1024 ? await call('sendPhoto', { chat_id: chatId, photo: imageUrl, caption: text, parse_mode: 'HTML' }, 40000) : await call('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML' });
         return { ok: true, messageId: String(r.message_id) };
       } catch (e) { return { ok: false, ...explainTelegram(e) }; }
     },
