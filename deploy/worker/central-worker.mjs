@@ -81,6 +81,7 @@ export function evolutionClient(ctx, cfg, key) {
     },
     restart: async () => { for (const m of ['PUT', 'POST']) { const r = await call(m, `/instance/restart/${inst}`, undefined, 30000); if (r.status < 300) return true; if (![404, 405].includes(r.status)) throw httpErr('evolution', r); } throw new Error('A Evolution não aceita reiniciar por API nesta versão'); },
     logout: async () => { const r = await call('DELETE', `/instance/logout/${inst}`); return r.status < 300 || r.status === 404; },
+    remove: async () => { const r = await call('DELETE', `/instance/delete/${inst}`, undefined, 30000); return r.status < 300 || r.status === 404; },
     getWebhook: async () => { const r = await call('GET', `/webhook/find/${inst}`); if (r.status >= 400) return null; const j = r.data || {}; const w = j.webhook && typeof j.webhook === 'object' ? j.webhook : j; return { enabled: !!w.enabled, url: String(w.url || ''), events: Array.isArray(w.events) ? w.events : [] }; },
     setWebhook: async (url) => {
       const events = ['MESSAGES_UPSERT'];
@@ -136,8 +137,12 @@ function groupApi(call) {
 }
 const waParticipant = (p) => { const id = p && (p.phoneNumber || p.id || p.jid || p); const ph = jidPhone(p && p.phoneNumber || id) || digits(id); return ph ? { external_id: ph, display_name: '+' + ph, role: p && (p.admin === 'admin' || p.admin === 'superadmin' || p.isAdmin) ? 'admin' : 'member' } : null; };
 const toDataUrl = (b64) => { if (typeof b64 !== 'string' || !b64) return null; if (b64.startsWith('data:image/')) return b64.length < 400000 ? b64 : null; return /^[A-Za-z0-9+/=]+$/.test(b64) && b64.length < 400000 ? 'data:image/png;base64,' + b64 : null; };
-const httpErr = (who, r) => { const e = new Error(`${who} respondeu HTTP ${r.status}${msgOf(r.data) ? ': ' + msgOf(r.data) : ''}`); e.status = r.status; return e; };
-const msgOf = (d) => { if (!d) return ''; if (typeof d === 'string') return clean(d); const m = d.message ?? d.error ?? d.description ?? (d.response && d.response.message); return clean(Array.isArray(m) ? m.join('; ') : typeof m === 'object' ? JSON.stringify(m) : m); };
+const httpErr = (who, r) => {
+  const txt = msgOf(r.data); const dead = who === 'evolution' && /connection closed/i.test(JSON.stringify(r.data || {}));
+  const e = new Error(dead ? 'A sessão do WhatsApp travou na Evolution (Connection Closed). Em Configurações → WhatsApp clique em Desconectar e leia o QR de novo.' : `${who} respondeu HTTP ${r.status}${txt ? ': ' + txt : ''}`);
+  e.status = r.status; if (dead) e.dead = true; return e;
+};
+const msgOf = (d) => { if (!d) return ''; if (typeof d === 'string') return clean(d); const m = (d.response && d.response.message) ?? d.message ?? d.error ?? d.description; return clean(Array.isArray(m) ? m.join('; ') : typeof m === 'object' ? JSON.stringify(m) : m); };
 
 // Traduz a recusa da Evolution em código curto + se vale tentar de novo.
 export function explainEvolution(status, data) {
@@ -629,7 +634,13 @@ async function integrationTask(ctx, rt, payload) {
     }
     if (action === 'restart') { await ev.restart(); return { restarted: true }; }
     if (action === 'logout') {
-      if (!(await ev.logout())) throw new Error('A Evolution não aceitou desconectar o número');
+      let removed = false;
+      if (!(await ev.logout().catch(() => false))) {
+        // sessão travada ("Connection Closed"): o logout normal não funciona, então a instância é recriada no próximo Conectar
+        if (!(await ev.remove().catch(() => false))) throw new Error('A Evolution não aceitou desconectar o número. Remova o aparelho em WhatsApp → Aparelhos conectados.');
+        removed = true;
+      }
+      if (removed) { const st = { ...(rt.status.evolution || {}), reachable: true, state: 'close', phone: null, profile: null, checked_at: ctx.now().toISOString(), managed: (rt.managed && rt.managed.evolution) || {} }; await ctx.rpc('report_integration_status', { p_provider: 'evolution', p_status: st }); return { logged_out: true, state: 'close', recreated: true }; }
       // confere o estado real (a Evolution leva alguns segundos para largar a sessão) e atualiza o painel
       let state = 'open';
       for (let i = 0; i < 5 && state === 'open'; i++) { await new Promise((r) => setTimeout(r, 1500)); state = await ev.state().catch(() => 'unknown'); }
@@ -911,7 +922,7 @@ export async function runMonitor(ctx) {
       if (rt.telegram.mode === 'polling' && st.mode_live === 'webhook') await bot.deleteWebhook();
       if (rt.telegram.mode === 'polling') {
         const ups = await bot.updates(offset || undefined);
-        for (const u of ups) { const m = mapTelegramUpdate(u); if (m) { await ctx.rpc('ingest_chat_message', { p: m }).catch(() => {}); got++; } offset = Math.max(offset, u.update_id + 1); }
+        for (const u of ups) { await registerTelegramChat(ctx, u); const m = mapTelegramUpdate(u); if (m) { await ctx.rpc('ingest_chat_message', { p: m }).catch(() => {}); got++; } offset = Math.max(offset, u.update_id + 1); }
       }
       await ctx.rpc('report_integration_status', { p_provider: 'telegram', p_status: { ...st, offset, received_last_run: got, mode: rt.telegram.mode } }); out.telegram = 'ok';
     } catch (e) { await ctx.rpc('report_integration_status', { p_provider: 'telegram', p_status: { ok: false, error: clean(e && e.message), offset } }); out.telegram = 'erro'; }
@@ -952,6 +963,19 @@ export function mapTelegramUpdate(u) {
     direction: 'in', external_id: `${c.id}:${m.message_id}`, sender_external_id: from.id != null ? String(from.id) : undefined, sender_name: from.title || [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username,
     body: tgBody(m, text) || `[${kind}]`, kind, sent_at: m.date ? new Date(m.date * 1000).toISOString() : undefined };
 }
+// Telegram: o bot virou (ou deixou de ser) administrador/membro de um canal ou grupo -> o chat passa a aparecer em Destinos,
+// mesmo que ninguém tenha escrito nada nele ainda. Também vale para posts sem texto (foto, vídeo).
+export function mapTelegramChat(u) {
+  if (!u) return null;
+  const mc = u.my_chat_member; const m = u.message || u.channel_post;
+  const c = (mc && mc.chat) || (m && m.chat); if (!c || c.id == null || c.type === 'private') return null;
+  const status = mc && mc.new_chat_member && mc.new_chat_member.status;
+  if (status === 'left' || status === 'kicked') return null;
+  const out = { channel: 'telegram', external_id: String(c.id), kind: c.type === 'channel' ? 'channel' : 'group', title: c.title || undefined, username: c.username || undefined };
+  if (status) out.we_are_admin = status === 'administrator' || status === 'creator';
+  return out;
+}
+async function registerTelegramChat(ctx, u) { const c = mapTelegramChat(u); if (c) await ctx.rpc('upsert_chat', { p: c }).catch(() => {}); }
 // Webhook do Telegram: confere o segredo do cabeçalho X-Telegram-Bot-Api-Secret-Token antes de aceitar.
 /* ------------------------------------------------------------------ Segurança dos webhooks de entrada */
 // Comparação em tempo constante (evita descobrir o segredo pelo tempo de resposta).
@@ -979,6 +1003,7 @@ export function guardWebhook(ctx, kind, item) {
 export async function handleTelegramWebhook(ctx, headers, body) {
   const rt = await loadRuntime(ctx); const want = rt.secrets.telegram_webhook_secret; const got = headers && (headers['x-telegram-bot-api-secret-token'] || headers['X-Telegram-Bot-Api-Secret-Token']);
   if (!want || want.length < 16 || !safeEq(got, want)) return { ok: false, status: 401 };
+  await registerTelegramChat(ctx, body);
   const m = mapTelegramUpdate(body); if (m) await ctx.rpc('ingest_chat_message', { p: m });
   return { ok: true, status: 200 };
 }
