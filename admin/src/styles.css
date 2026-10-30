@@ -399,3 +399,11 @@ select option,select optgroup{background:var(--surface);color:var(--text)}
 .cap svg{flex:none;margin-top:2px}
 .cap.yes{color:var(--text)}.cap.yes svg{color:var(--ok)}
 .cap.no{color:var(--muted)}.cap.no svg{color:var(--muted)}
+
+/* Conectores: conta conectada, convite para conectar e produtos de amostra */
+.acct{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface-2)}
+.avatar-ml{width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--tag);color:var(--tag-ink);font-weight:700;text-transform:uppercase}
+.cta{display:flex;align-items:center;gap:14px;padding:14px;border:1px dashed var(--line-2);border-radius:var(--r-sm);flex-wrap:wrap}.cta>div{flex:1;min-width:200px}
+.prod{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm)}
+.prod img,.prod .ph{width:52px;height:52px;border-radius:8px;object-fit:cover;flex:none;background:var(--surface-3)}
+.badge .xbtn{border:0;background:transparent;color:inherit;padding:0 0 0 2px;display:inline-grid;place-items:center;cursor:pointer;opacity:.7}.badge .xbtn:hover{opacity:1}

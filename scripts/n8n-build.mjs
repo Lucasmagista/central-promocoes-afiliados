@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'deploy', 'n8n');
 // O Code node do n8n não aceita `export`; o restante do módulo é JavaScript comum.
-const worker = readFileSync(join(out, 'central-worker.mjs'), 'utf8').replace(/^export (async function|function|const)/gm, '$1');
+const worker = readFileSync(join(out, 'central-worker.mjs'), 'utf8').replace(/\r\n/g, '\n').replace(/^export (async function|function|const)/gm, '$1');
 
 const migrations = readdirSync(join(root, 'db', 'migrations')).filter((f) => /^\d{3}_[a-z0-9_]+\.sql$/i.test(f)).sort().map((version) => ({ version, sql: readFileSync(join(root, 'db', 'migrations', version), 'utf8') }));
 
@@ -89,7 +89,7 @@ files['01-acoes-do-painel.json'] = wf('Central — Ações do painel (a cada 5 s
 
 files['02-envios-e-monitor.json'] = wf('Central — Envios, respostas e monitor (a cada 1 min)', [
   node('t2', 'A cada minuto', 'n8n-nodes-base.scheduleTrigger', 1.2, { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }, [0, 0]),
-  code('c2', 'Enviar e monitorar', `${worker}\n${adapter}\nconst a = await runSender(ctx, { budgetMs: 50000 });\nconst b = await runMonitor(ctx);\nreturn [{ json: { ...a, monitor: b } }];`, [260, 0]),
+  code('c2', 'Enviar e monitorar', `${worker}\n${adapter}\nconst a = await runSender(ctx, { budgetMs: 50000 });\nconst b = await runMonitor(ctx);\nconst c = await runCollectors(ctx).catch(() => ({}));\nreturn [{ json: { ...a, monitor: b, coleta: c } }];`, [260, 0]),
 ], link('A cada minuto', 'Enviar e monitorar'), { executionTimeout: 110 });
 
 const webhook = (id, name, path) => node(id, name, 'n8n-nodes-base.webhook', 2, { httpMethod: 'POST', path, responseMode: 'responseNode', options: { rawBody: false } }, [0, 0]);
@@ -130,7 +130,7 @@ const nodes = [
     '## Central de Promoções — workflow completo',
     '**Já vem configurado:** não precisa de variáveis de ambiente do n8n.',
     '**1.** Se a chave ainda aparecer como `COLE_AQUI_A_SERVICE_ROLE_KEY`, troque pelo valor da *service_role* do Supabase (Project Settings → API). Dica: use o script `subir-n8n.ps1`, que faz isso e importa sozinho.',
-    '**2.** Rode as migrações do banco (até a `011`).',
+    '**2.** Rode as migrações do banco (até a `013`).',
     '**3.** Ative este workflow (chave *Active*, no topo).',
     '**4.** Painel → Configurações → n8n → **Rodar autoteste**.',
     '**5.** Copie a *Production URL* dos nós **Webhook WhatsApp** e **Webhook Telegram** e cole nas abas WhatsApp e Telegram do painel.',
@@ -159,7 +159,7 @@ const nodes = [
 
   SEC('b', 'Envios e monitor', 'A cada minuto publica as ofertas aprovadas, envia respostas e vigia WhatsApp e Telegram. Trava contra execução dupla; respeita pausa geral, janelas e limites por destino.', 340, 300, 5),
   node('t2', 'A cada minuto', 'n8n-nodes-base.scheduleTrigger', 1.2, { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }, [X[0], 470]),
-  code('c2', 'Enviar e monitorar', `${worker}\n${adapter}\nif (!lockTake('sender', 110000)) return [{ json: { skipped: 'execução anterior ainda em andamento' } }];\ntry {\n  const a = await runSender(ctx, { budgetMs: SEG.orcamentoEnvioMs, maxPerRun: SEG.enviosPorExecucao });\n  const b = await runMonitor(ctx);\n  return [{ json: { ...a, monitor: b } }];\n} finally { lockFree('sender'); }`, [X[1], 470]),
+  code('c2', 'Enviar e monitorar', `${worker}\n${adapter}\nif (!lockTake('sender', 110000)) return [{ json: { skipped: 'execução anterior ainda em andamento' } }];\ntry {\n  const a = await runSender(ctx, { budgetMs: SEG.orcamentoEnvioMs, maxPerRun: SEG.enviosPorExecucao });\n  const b = await runMonitor(ctx);\n  const c = await runCollectors(ctx).catch(() => ({}));\n  return [{ json: { ...a, monitor: b, coleta: c } }];\n} finally { lockFree('sender'); }`, [X[1], 470]),
 
   SEC('c', 'Entrada do WhatsApp (Evolution → n8n)', 'Porteiro valida e limita; só então grava a mensagem. Bloqueado responde direto, sem tocar no banco.', 680, 340, 3),
   wh('w3', 'Webhook WhatsApp (Evolution)', paths.whatsapp, 'POST', [X[0], 800]),

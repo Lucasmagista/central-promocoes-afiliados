@@ -20,9 +20,11 @@ const digits = (s) => String(s ?? '').replace(/\D/g, '');
 const jidPhone = (jid) => { const m = /^(\d{8,20})(?::\d+)?@/.exec(String(jid || '')); return m ? m[1] : ''; };
 const isGroupJid = (j) => /@g\.us$/.test(String(j || ''));
 
-/* SHA-256 em JavaScript puro (UTF-8): dispensa NODE_FUNCTION_ALLOW_BUILTIN=crypto no n8n. */
-export function sha256Hex(str) {
-  const bytes = []; for (const ch of unescape(encodeURIComponent(String(str)))) bytes.push(ch.charCodeAt(0));
+/* SHA-256 e HMAC-SHA256 em JavaScript puro (UTF-8): dispensam NODE_FUNCTION_ALLOW_BUILTIN=crypto no n8n. */
+const utf8 = (str) => { const out = []; for (const ch of unescape(encodeURIComponent(String(str)))) out.push(ch.charCodeAt(0)); return out; };
+const toHex = (bytes) => bytes.map((v) => (v & 255).toString(16).padStart(2, '0')).join('');
+function sha256Bytes(input) {
+  const bytes = input.slice();
   const K = []; { let n = 2, c = 0; while (c < 64) { let p = true; for (let i = 2; i * i <= n; i++) if (n % i === 0) { p = false; break; } if (p) { K.push((Math.cbrt(n) % 1 * 4294967296) | 0); c++; } n++; } }
   const H = []; { let n = 2, c = 0; while (c < 8) { let p = true; for (let i = 2; i * i <= n; i++) if (n % i === 0) { p = false; break; } if (p) { H.push((Math.sqrt(n) % 1 * 4294967296) | 0); c++; } n++; } }
   const l = bytes.length; bytes.push(0x80); while (bytes.length % 64 !== 56) bytes.push(0);
@@ -38,7 +40,13 @@ export function sha256Hex(str) {
     }
     H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
   }
-  return H.map((v) => (v >>> 0).toString(16).padStart(8, '0')).join('');
+  const out = []; for (const v of H) out.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255); return out;
+}
+export function sha256Hex(str) { return toHex(sha256Bytes(utf8(str))); }
+export function hmacSha256Hex(key, msg) {
+  let k = utf8(key); if (k.length > 64) k = sha256Bytes(k); while (k.length < 64) k.push(0);
+  const inner = sha256Bytes([...k.map((b) => b ^ 0x36), ...utf8(msg)]);
+  return toHex(sha256Bytes([...k.map((b) => b ^ 0x5c), ...inner]));
 }
 
 /* ------------------------------------------------------------------ Evolution */
@@ -195,7 +203,24 @@ export function explainTelegram(e) {
   return { code: 'rejected', error: clean(e.message), permanent: true };
 }
 
-/* ------------------------------------------------------------------ Lojas */
+/* ------------------------------------------------------------------ Lojas: conta conectada, amostra e coleta */
+const connectorOf = (rt, p) => { const c = (rt.connectors && rt.connectors[p]) || { mode: 'disabled', config: {} }; const g = c.config || {}; return p === 'amazon' && !g.partner_tag && g.affiliate_tag ? { ...c, config: { ...g, partner_tag: g.affiliate_tag } } : c; };
+const round2 = (n) => Math.round(n * 100) / 100;
+const pctOff = (price, prev) => (prev && prev > price ? round2((prev - price) / prev * 100) : 0);
+const STORE_LABEL = { mercadolivre: 'Mercado Livre', shopee: 'Shopee', aliexpress: 'AliExpress', amazon: 'Amazon' };
+const SOURCE_NAME = { mercadolivre: 'API Mercado Livre', shopee: 'Shopee Open API', aliexpress: 'AliExpress Affiliate API', amazon: 'Amazon Creators API' };
+const authStop = (e) => e && (e.status === 401 || e.status === 403 || /Invalid Signature|conecte a conta|Conecte a conta/i.test(String(e.message)));
+
+// Termos de busca por tipo de produto (usados quando o conector não tem "keywords" próprias).
+const SEARCH_TERMS = { eletronicos: ['fone bluetooth', 'smartwatch'], informatica: ['notebook', 'ssd'], games: ['controle gamer', 'console'], casa: ['luminária', 'organizador'], cozinha: ['air fryer', 'cafeteira'], automotivo: ['som automotivo', 'capacete'], moda: ['tênis', 'mochila'], beleza: ['perfume', 'secador de cabelo'], saude: ['suplemento', 'massageador'], esporte: ['bicicleta', 'halteres'], bebes: ['carrinho de bebê'], brinquedos: ['lego'], ferramentas: ['furadeira', 'parafusadeira'], pet: ['ração', 'comedouro'], mercado: ['café', 'azeite'], livros: ['livro', 'caderno'] };
+export function termsFor(cfg) {
+  const kw = Array.isArray(cfg.keywords) ? cfg.keywords.filter((k) => typeof k === 'string' && k.trim()) : [];
+  if (kw.length) return kw.map((q) => ({ q: q.trim(), cat: undefined }));
+  const cats = Array.isArray(cfg.categories) && cfg.categories.length ? cfg.categories : ['eletronicos', 'informatica', 'casa'];
+  return cats.flatMap((c) => (SEARCH_TERMS[c] || []).map((q) => ({ q, cat: c })));
+}
+
+/* ---- Shopee: a conta é o par App ID + Secret do Programa de Afiliados (não existe login/OAuth). */
 async function shopeeCall(ctx, cfg, secret, query, variables) {
   const endpoint = cfg.api_endpoint || 'https://open-api.affiliate.shopee.com.br/graphql';
   const payload = JSON.stringify({ query, variables: variables || {} });
@@ -207,28 +232,263 @@ async function shopeeCall(ctx, cfg, secret, query, variables) {
   }
   return r.data && r.data.data;
 }
+const SP_FULL = 'itemId shopId productName price priceMin priceMax priceDiscountRate commissionRate sales ratingStar imageUrl shopName productLink offerLink';
+const SP_MIN = 'itemId productName price commissionRate imageUrl productLink offerLink';
+async function shopeeProducts(ctx, cfg, secret, keyword, limit, sortType = 2) {
+  // sortType: 1 relevância · 2 mais vendidos · 3 maior preço · 4 menor preço · 5 maior comissão
+  const q = (f) => `query{ productOfferV2(keyword:${JSON.stringify(String(keyword))}, sortType:${sortType}, page:1, limit:${limit}){ nodes{ ${f} } } }`;
+  let d; try { d = await shopeeCall(ctx, cfg, secret, q(SP_FULL)); } catch (e) { if (!/field|cannot query|validation/i.test(String(e.message))) throw e; d = await shopeeCall(ctx, cfg, secret, q(SP_MIN)); }
+  return (d && d.productOfferV2 && d.productOfferV2.nodes) || [];
+}
+export function shopeeItem(n) {
+  const price = Number(n.price) || Number(n.priceMin) || 0; const rate = Number(n.priceDiscountRate) || 0;
+  const prev = rate > 0 && rate < 95 ? round2(price / (1 - rate / 100)) : null; const cr = Number(n.commissionRate);
+  return { external_id: n.shopId ? `${n.shopId}.${n.itemId}` : String(n.itemId || ''), title: String(n.productName || '').trim(), price, previous: prev, derived_previous: !!prev, url: n.productLink || '', affiliate_url: n.offerLink || '', image: n.imageUrl || null, seller: n.shopName || null,
+    commission_pct: Number.isFinite(cr) && cr > 0 ? round2(cr <= 1 ? cr * 100 : cr) : null, sold: Number(n.sales) || null, rating: Number(n.ratingStar) || null, stock: null };
+}
+async function shopeeReport(ctx, cfg, secret) {
+  const end = Math.floor(ctx.now().getTime() / 1000), start = end - 30 * 86400;
+  const d = await shopeeCall(ctx, cfg, secret, `query{ conversionReport(purchaseTimeStart:${start}, purchaseTimeEnd:${end}, limit:100){ nodes{ totalCommission } pageInfo{ hasNextPage } } }`);
+  const cr = (d && d.conversionReport) || {}; const nodes = cr.nodes || [];
+  return { conversions: nodes.length, more: !!(cr.pageInfo && cr.pageInfo.hasNextPage), commission: round2(nodes.reduce((a, n) => a + (Number(n.totalCommission) || 0), 0)) };
+}
+
+/* ---- Mercado Livre: OAuth (authorization_code). Os tokens ficam no cofre; o refresh_token gira a cada uso. */
 const mlBase = (ctx) => (ctx.urls && ctx.urls.ml) || 'https://api.mercadolibre.com';
+async function mlSaveTokens(ctx, rt, d) {
+  const exp = String(Math.floor(ctx.now().getTime() / 1000) + Number(d.expires_in || 21600));
+  await ctx.rpc('store_integration_token', { p_key: 'ml_access_token', p_value: d.access_token });
+  if (d.refresh_token) await ctx.rpc('store_integration_token', { p_key: 'ml_refresh_token', p_value: d.refresh_token });
+  await ctx.rpc('store_integration_token', { p_key: 'ml_token_expires_at', p_value: exp });
+  rt.secrets.ml_access_token = d.access_token; if (d.refresh_token) rt.secrets.ml_refresh_token = d.refresh_token; rt.secrets.ml_token_expires_at = exp;
+}
+const mlFresh = (ctx, sec) => !!sec.ml_access_token && Number(sec.ml_token_expires_at || 0) * 1000 - ctx.now().getTime() > 300000;
+async function mlToken(ctx, rt) {
+  const cfg = connectorOf(rt, 'mercadolivre').config || {}; const sec = rt.secrets;
+  if (mlFresh(ctx, sec)) return sec.ml_access_token;
+  if (!sec.ml_refresh_token) { const e = new Error('Conta do Mercado Livre não conectada: use “Conectar conta” no conector.'); e.status = 401; throw e; }
+  if (!cfg.app_id || !sec.ml_client_secret) throw new Error('Informe o App ID e a chave secreta do aplicativo do Mercado Livre.');
+  const t = await ctx.http({ method: 'POST', url: mlBase(ctx) + '/oauth/token', headers: { accept: 'application/json' }, form: { grant_type: 'refresh_token', client_id: cfg.app_id, client_secret: sec.ml_client_secret, refresh_token: sec.ml_refresh_token }, timeoutMs: 20000 });
+  if (t.status < 400 && t.data && t.data.access_token) { await mlSaveTokens(ctx, rt, t.data); return t.data.access_token; }
+  // o refresh_token é de uso único: outro worker pode ter renovado agora há pouco. Relê o cofre antes de desistir.
+  const again = await loadRuntime(ctx).catch(() => null);
+  if (again && mlFresh(ctx, again.secrets)) { Object.assign(rt.secrets, again.secrets); return again.secrets.ml_access_token; }
+  const e = new Error(`O Mercado Livre recusou a renovação do acesso (${t.status}). Conecte a conta de novo.`); e.status = 401; throw e;
+}
+async function mlGet(ctx, rt, path) {
+  const tok = await mlToken(ctx, rt);
+  const r = await ctx.http({ method: 'GET', url: mlBase(ctx) + path, headers: { Authorization: `Bearer ${tok}` }, timeoutMs: 15000 });
+  if (r.status >= 400) { const e = new Error(`o Mercado Livre respondeu ${r.status}${msgOf(r.data) ? ': ' + msgOf(r.data) : ''}`); e.status = r.status; throw e; }
+  return r.data;
+}
+export function mlItem(it) {
+  it = it || {}; const price = Number(it.price) || 0; const prev = it.original_price != null ? Number(it.original_price) : null;
+  return { external_id: String(it.id || ''), title: String(it.title || '').trim(), price, previous: prev && prev > price ? prev : null, url: it.permalink || '', affiliate_url: '',
+    image: it.thumbnail ? String(it.thumbnail).replace(/^http:/, 'https:').replace(/-I\.(jpg|webp)$/, '-O.$1') : null, seller: it.seller && it.seller.nickname || null,
+    stock: it.available_quantity == null ? null : Number(it.available_quantity), used: !!it.condition && it.condition !== 'new', sold: Number(it.sold_quantity) || null, free_shipping: !!(it.shipping && it.shipping.free_shipping) };
+}
+async function mlSearch(ctx, rt, q, limit) { const d = await mlGet(ctx, rt, `/sites/MLB/search?q=${encodeURIComponent(q)}&limit=${limit}`); return ((d && d.results) || []).map(mlItem); }
+async function mlAccount(ctx, rt) {
+  const d = (await mlGet(ctx, rt, '/users/me')) || {}; const rep = d.seller_reputation || {};
+  return { id: String(d.id || ''), nickname: d.nickname || null, site: d.site_id || null, permalink: d.permalink || null, level: rep.level_id || null, power_seller: rep.power_seller_status || null, registered: d.registration_date || null };
+}
+async function mlExchange(ctx, rt, payload) {
+  const cfg = connectorOf(rt, 'mercadolivre').config || {}; const sec = rt.secrets;
+  need(cfg.app_id && sec.ml_client_secret, 'Informe o App ID e a chave secreta do aplicativo do Mercado Livre antes de conectar.');
+  const redirect = payload.redirect_uri || cfg.redirect_uri; need(redirect, 'Informe a URL de redirecionamento do aplicativo.');
+  const t = await ctx.http({ method: 'POST', url: mlBase(ctx) + '/oauth/token', headers: { accept: 'application/json' }, form: { grant_type: 'authorization_code', client_id: cfg.app_id, client_secret: sec.ml_client_secret, code: payload.code, redirect_uri: redirect }, timeoutMs: 20000 });
+  if (t.status >= 400 || !t.data || !t.data.access_token) throw new Error(`O Mercado Livre não aceitou a autorização (${t.status}): ${msgOf(t.data) || 'o código vale poucos minutos; clique em “Conectar conta” de novo'}`);
+  await mlSaveTokens(ctx, rt, t.data);
+  const account = await mlAccount(ctx, rt);
+  const out = { ok: true, connected: true, account, detail: `Conta conectada: ${account.nickname || account.id}.` };
+  await ctx.rpc('report_integration_status', { p_provider: 'mercadolivre', p_status: { ok: true, connected: true, account, detail: out.detail } });
+  return out;
+}
+async function mlDisconnect(ctx, rt) {
+  for (const k of ['ml_access_token', 'ml_refresh_token', 'ml_token_expires_at']) await ctx.rpc('store_integration_token', { p_key: k, p_value: '' });
+  await ctx.rpc('report_integration_status', { p_provider: 'mercadolivre', p_status: { ok: false, connected: false, detail: 'Conta desconectada.' } });
+  return { disconnected: true };
+}
+
+/* ---- AliExpress: Affiliate API. A "conta" é App Key + App Secret + Tracking ID do portal de afiliados. Assinatura HMAC-SHA256. ---- */
+async function aliCall(ctx, cfg, secret, method, params) {
+  const p = { app_key: String(cfg.app_id), timestamp: String(ctx.now().getTime()), sign_method: 'sha256', method, ...params };
+  const base = Object.keys(p).sort().map((k) => k + p[k]).join('');
+  p.sign = String(await (ctx.hmacSha256hex || hmacSha256Hex)(secret, base)).toUpperCase();
+  const r = await ctx.http({ method: 'POST', url: cfg.api_endpoint || 'https://api-sg.aliexpress.com/sync', form: p, timeoutMs: 20000 });
+  const d = r.data && typeof r.data === 'object' ? r.data : {}; const er = d.error_response;
+  if (er || r.status >= 400) {
+    const txt = er ? String((er.msg || er.sub_msg || 'erro') + ' ' + (er.code || '')) : '';
+    const e = new Error(er ? `${clean(er.msg || er.sub_msg || 'erro')} (código ${er.code})` : `AliExpress respondeu HTTP ${r.status}`);
+    e.status = r.status >= 400 ? r.status : /sign|appkey|app key|permission|forbidden|invalid/i.test(txt) ? 401 : 0; throw e;
+  }
+  return d;
+}
+async function aliProducts(ctx, cfg, secret, keyword, size) {
+  const d = await aliCall(ctx, cfg, secret, 'aliexpress.affiliate.product.query', { keywords: keyword, page_no: '1', page_size: String(size), sort: 'LAST_VOLUME_DESC', target_currency: 'BRL', target_language: 'PT', ship_to_country: 'BR', tracking_id: String(cfg.tracking_id || cfg.affiliate_id || ''), fields: 'commission_rate,sale_price' });
+  const res = d.aliexpress_affiliate_product_query_response && d.aliexpress_affiliate_product_query_response.resp_result;
+  if (!res) throw new Error('Resposta inesperada da AliExpress (sem resp_result). Confira se o app tem a API de afiliados liberada.');
+  if (Number(res.resp_code) !== 200) throw new Error(`AliExpress: ${clean(res.resp_msg || 'recusado')} (código ${res.resp_code})`);
+  const list = res.result && res.result.products && res.result.products.product; return Array.isArray(list) ? list : [];
+}
+const num2 = (v) => Number(String(v ?? '').replace(/[^0-9.,-]/g, '').replace(',', '.')) || 0;
+export function aliItem(n) {
+  const price = num2(n.target_sale_price), orig = num2(n.target_original_price), cr = num2(n.commission_rate);
+  return { external_id: String(n.product_id || ''), title: String(n.product_title || '').trim(), price, previous: orig > price ? orig : null, url: n.product_id ? `https://pt.aliexpress.com/item/${n.product_id}.html` : '', affiliate_url: n.promotion_link || '',
+    image: n.product_main_image_url || null, seller: null, commission_pct: cr > 0 ? cr : null, sold: Number(n.lastest_volume) || null, rating: num2(n.evaluate_rate) || null, stock: null };
+}
+
+/* ---- Amazon: Creators API (OAuth 2.0 client_credentials). detailPageURL já traz a sua tag de associado. ---- */
+const AMZ_TOKEN = { '3.1': 'https://api.amazon.com/auth/o2/token', '3.2': 'https://api.amazon.co.uk/auth/o2/token', '3.3': 'https://api.amazon.co.jp/auth/o2/token' };
+async function amazonToken(ctx, rt, cfg) {
+  if (rt._amz) return rt._amz;
+  const known = AMZ_TOKEN[cfg.credential_version || '3.1']; need(known, 'Versão da credencial inválida (use 3.1, 3.2 ou 3.3).'); const url = (ctx.urls && ctx.urls.amazonToken) || known;
+  const r = await ctx.http({ method: 'POST', url, json: { grant_type: 'client_credentials', client_id: cfg.client_id, client_secret: rt.secrets.amazon_client_secret, scope: 'creatorsapi::default' }, timeoutMs: 20000 });
+  if (r.status >= 400 || !r.data || !r.data.access_token) { const e = new Error(`A Amazon recusou as credenciais (${r.status}): ${msgOf(r.data) || 'confira o Credential ID, o Secret e a versão da credencial'}`); e.status = 401; throw e; }
+  return (rt._amz = r.data.access_token);
+}
+const AMZ_RES = ['itemInfo.title', 'images.primary.large', 'offersV2.listings.price', 'offersV2.listings.condition', 'offersV2.listings.availability', 'offersV2.listings.merchantInfo'];
+async function amazonSearch(ctx, rt, cfg, keyword, count) {
+  const token = await amazonToken(ctx, rt, cfg); const mkt = cfg.marketplace || 'www.amazon.com.br';
+  if (rt._amzCalls) await ctx.sleep(1100); rt._amzCalls = (rt._amzCalls || 0) + 1; // a Amazon limita a ~1 consulta por segundo
+  const body = { keywords: keyword, partnerTag: cfg.partner_tag, marketplace: mkt, itemCount: Math.min(10, count), condition: 'New', resources: AMZ_RES };
+  if (Number(cfg.min_discount_pct) > 0) body.minSavingPercent = Math.min(99, Math.floor(Number(cfg.min_discount_pct)));
+  const r = await ctx.http({ method: 'POST', url: ((ctx.urls && ctx.urls.amazon) || 'https://creatorsapi.amazon') + '/catalog/v1/searchItems', headers: { Authorization: `Bearer ${token}`, 'x-marketplace': mkt }, json: body, timeoutMs: 25000 });
+  if (r.status >= 400) { const er = r.data && Array.isArray(r.data.errors) && r.data.errors[0]; const e = new Error(`a Amazon respondeu ${r.status}: ${er ? clean(er.message || er.code) : msgOf(r.data) || 'sem detalhe'}`); e.status = r.status; throw e; }
+  return (r.data && r.data.searchResult && r.data.searchResult.items) || [];
+}
+export function amazonItem(it, mkt) {
+  const lst = (it.offersV2 && it.offersV2.listings) || (it.offers && it.offers.listings) || []; const l = lst.find((x) => x && x.isBuyBoxWinner) || lst[0] || {};
+  const pr = l.price || {}; const price = num2(pr.money && pr.money.amount); const basis = num2(pr.savingBasis && pr.savingBasis.money && pr.savingBasis.money.amount); const sav = num2(pr.savings && pr.savings.money && pr.savings.money.amount);
+  const prev = basis > price ? basis : sav > 0 ? round2(price + sav) : null; const av = String(l.availability && l.availability.type || '');
+  const img = it.images && it.images.primary && (it.images.primary.large || it.images.primary.medium);
+  return { external_id: String(it.asin || '').toUpperCase(), title: String(it.itemInfo && it.itemInfo.title && it.itemInfo.title.displayValue || '').trim(), price, previous: prev, url: it.asin ? `https://${mkt}/dp/${it.asin}` : '', affiliate_url: it.detailPageURL || '',
+    image: img && img.url || null, seller: l.merchantInfo && l.merchantInfo.name || null, stock: /out|unavail/i.test(av) ? 0 : null, commission_pct: null, sold: null };
+}
+const FETCH = {
+  mercadolivre: (ctx, rt, cfg, q) => mlSearch(ctx, rt, q, 50),
+  shopee: async (ctx, rt, cfg, q) => (await shopeeProducts(ctx, cfg, rt.secrets.shopee_secret, q, 30)).map(shopeeItem),
+  aliexpress: async (ctx, rt, cfg, q) => (await aliProducts(ctx, cfg, rt.secrets.aliexpress_app_secret, q, 30)).map(aliItem),
+  amazon: async (ctx, rt, cfg, q) => (await amazonSearch(ctx, rt, cfg, q, 10)).map((i) => amazonItem(i, cfg.marketplace || 'www.amazon.com.br')),
+};
+const credsOk = (p, cfg, sec) => p === 'shopee' ? cfg.app_id && sec.shopee_secret : p === 'mercadolivre' ? cfg.app_id && sec.ml_client_secret
+  : p === 'aliexpress' ? cfg.app_id && sec.aliexpress_app_secret && (cfg.tracking_id || cfg.affiliate_id) : cfg.client_id && cfg.partner_tag && sec.amazon_client_secret;
+
+/* ---- Teste de conexão: devolve a conta e uma amostra de produtos reais ---- */
+const previewItem = (it) => ({ title: it.title.slice(0, 90), price: it.price, previous: it.previous, discount_pct: pctOff(it.price, it.previous) || null, url: it.url, image: it.image, seller: it.seller, commission_pct: it.commission_pct ?? null, free_shipping: it.free_shipping || undefined });
+const sampleOf = (items, n = 3) => [...items].sort((a, b) => pctOff(b.price, b.previous) - pctOff(a.price, a.previous) || (b.sold || 0) - (a.sold || 0)).slice(0, n).map(previewItem);
+
 async function checkStore(ctx, provider, rt) {
-  const cfg = (rt.connectors[provider] && rt.connectors[provider].config) || {};
+  const cfg = connectorOf(rt, provider).config || {}; const sec = rt.secrets;
   if (provider === 'shopee') {
-    const secret = rt.secrets.shopee_secret;
-    if (!cfg.app_id || !secret) return { ok: false, error: 'Informe o App ID e a chave secreta da Shopee.' };
-    const d = await shopeeCall(ctx, cfg, secret, 'query($k:String){ productOfferV2(keyword:$k, page:1, limit:1){ nodes{ itemId productName offerLink } } }', { k: 'fone' });
-    const n = d && d.productOfferV2 && d.productOfferV2.nodes;
-    return { ok: true, detail: `Credenciais aceitas. Consulta de produtos respondeu com ${Array.isArray(n) ? n.length : 0} item(ns).` };
+    if (!cfg.app_id || !sec.shopee_secret) return { ok: false, error: 'Informe o App ID e a chave secreta da Shopee.' };
+    const nodes = await shopeeProducts(ctx, cfg, sec.shopee_secret, termsFor(cfg)[0] ? termsFor(cfg)[0].q : 'fone', 8);
+    const out = { ok: true, connected: true, detail: `Credenciais aceitas. A Shopee devolveu ${nodes.length} produto(s) de amostra.`, account: { id: String(cfg.app_id), kind: 'affiliate_app' }, sample: sampleOf(selectOffers(nodes.map(shopeeItem), {}, 30).list) };
+    try { out.account.report = await shopeeReport(ctx, cfg, sec.shopee_secret); } catch (e) { out.account.report_error = clean(e && e.message); }
+    return out;
   }
   if (provider === 'mercadolivre') {
-    const secret = rt.secrets.ml_client_secret;
-    if (!cfg.app_id || !secret) return { ok: false, error: 'Informe o App ID e a chave secreta do aplicativo do Mercado Livre.' };
-    const t = await ctx.http({ method: 'POST', url: mlBase(ctx) + '/oauth/token', form: { grant_type: 'client_credentials', client_id: cfg.app_id, client_secret: secret }, timeoutMs: 20000 });
-    if (t.status >= 400 || !t.data || !t.data.access_token) return { ok: false, error: `O Mercado Livre recusou as credenciais (${t.status}): ${msgOf(t.data) || 'verifique App ID e chave secreta'}` };
-    const s = await ctx.http({ method: 'GET', url: mlBase(ctx) + '/sites/MLB/search?q=fone&limit=1', headers: { Authorization: `Bearer ${t.data.access_token}` }, timeoutMs: 20000 });
-    if (s.status >= 400) return { ok: false, error: `Token aceito, mas a busca de produtos respondeu ${s.status}: ${msgOf(s.data) || 'permissões insuficientes no aplicativo'}` };
-    return { ok: true, detail: `Credenciais aceitas; busca de produtos respondeu normalmente. Token válido por ${Math.round((t.data.expires_in || 0) / 3600)} h.` };
+    if (!cfg.app_id || !sec.ml_client_secret) return { ok: false, error: 'Informe o App ID e a chave secreta do aplicativo do Mercado Livre.' };
+    if (!sec.ml_refresh_token && !sec.ml_access_token) {
+      // sem conta conectada: só valida o aplicativo
+      const t = await ctx.http({ method: 'POST', url: mlBase(ctx) + '/oauth/token', form: { grant_type: 'client_credentials', client_id: cfg.app_id, client_secret: sec.ml_client_secret }, timeoutMs: 20000 });
+      if (t.status >= 400 || !t.data || !t.data.access_token) return { ok: false, connected: false, error: `O Mercado Livre recusou as credenciais (${t.status}): ${msgOf(t.data) || 'verifique App ID e chave secreta'}` };
+      const s = await ctx.http({ method: 'GET', url: mlBase(ctx) + '/sites/MLB/search?q=fone&limit=1', headers: { Authorization: `Bearer ${t.data.access_token}` }, timeoutMs: 20000 });
+      if (s.status >= 400) return { ok: false, connected: false, error: `Aplicativo aceito, mas a busca de produtos respondeu ${s.status}: ${msgOf(s.data) || 'permissões insuficientes no aplicativo'}` };
+      return { ok: true, partial: true, connected: false, detail: 'O aplicativo é válido. Falta autorizar a sua conta: clique em “Conectar conta”.' };
+    }
+    let account; try { account = await mlAccount(ctx, rt); } catch (e) { return { ok: false, connected: false, error: clean(e && e.message) }; }
+    const out = { ok: true, connected: true, account, detail: `Conectado como ${account.nickname || account.id}.` };
+    try { out.sample = sampleOf(selectOffers(await mlSearch(ctx, rt, termsFor(cfg)[0] ? termsFor(cfg)[0].q : 'fone', 30), {}, 30).list); }
+    catch (e) { out.partial = true; out.search_error = clean(e && e.message); out.detail += ' A busca de produtos falhou: ' + out.search_error; }
+    return out;
   }
-  // Amazon: a Creators API (OAuth) ainda não tem verificação automática aqui; só conferimos o preenchimento.
-  const miss = [!cfg.client_id && 'Client ID', !cfg.partner_tag && 'tag de associado', !rt.secrets.amazon_client_secret && 'chave secreta'].filter(Boolean);
-  return miss.length ? { ok: false, error: `Falta informar: ${miss.join(', ')}.` } : { ok: true, partial: true, detail: 'Campos preenchidos. A verificação automática da Amazon ainda não está disponível; teste gerando um link no painel do Associates.' };
+  const first = termsFor(cfg)[0] ? termsFor(cfg)[0].q : 'fone';
+  if (provider === 'aliexpress') {
+    if (!credsOk(provider, cfg, sec)) return { ok: false, error: 'Informe o App Key, o App Secret e o Tracking ID da AliExpress.' };
+    const nodes = await aliProducts(ctx, cfg, sec.aliexpress_app_secret, first, 8);
+    return { ok: true, connected: true, detail: `Credenciais aceitas. A AliExpress devolveu ${nodes.length} produto(s) de amostra.`, account: { id: String(cfg.app_id), kind: 'affiliate_app', tracking_id: String(cfg.tracking_id || cfg.affiliate_id) }, sample: sampleOf(selectOffers(nodes.map(aliItem), {}, 30).list) };
+  }
+  if (provider === 'amazon') {
+    if (!credsOk(provider, cfg, sec)) return { ok: false, error: `Falta informar: ${[!cfg.client_id && 'Credential ID', !cfg.partner_tag && 'tag de associado', !sec.amazon_client_secret && 'Credential Secret'].filter(Boolean).join(', ')}.` };
+    const items = await amazonSearch(ctx, rt, cfg, first, 5); const mkt = cfg.marketplace || 'www.amazon.com.br';
+    return { ok: true, connected: true, detail: `Credenciais aceitas. A Amazon devolveu ${items.length} produto(s) de amostra.`, account: { id: String(cfg.partner_tag), kind: 'associate', marketplace: mkt }, sample: sampleOf(selectOffers(items.map((i) => amazonItem(i, mkt)), {}, 30).list) };
+  }
+  // Magalu: não há API pública de afiliados confirmada; a entrada é manual com link gerado no painel do Parceiro Magalu.
+  const miss = [!cfg.affiliate_id && !cfg.link_template && 'ID de afiliado ou modelo do link'].filter(Boolean);
+  return miss.length ? { ok: false, error: `Falta informar: ${miss.join(', ')}.` } : { ok: true, partial: true, detail: 'Dados preenchidos. A Magalu não oferece API pública de afiliados: cadastre ofertas em “Nova oferta” com o link gerado no painel do Parceiro Magalu.' };
+}
+
+/* ---- Coleta: busca produtos reais pela API, filtra pelas regras do conector e entrega ao banco (ingest_offer) ---- */
+async function gather(ctx, rt, provider, cfg, maxTerms) {
+  const terms = termsFor(cfg).slice(0, maxTerms); const items = []; const errors = [];
+  for (const t of terms) {
+    try {
+      const got = await FETCH[provider](ctx, rt, cfg, t.q);
+      for (const it of got) items.push({ ...it, category: t.cat, term: t.q });
+    } catch (e) { errors.push(`${t.q}: ${clean(e && e.message)}`); if (authStop(e)) break; }
+  }
+  return { items, errors, terms: terms.length };
+}
+export function selectOffers(items, cfg, limit) {
+  const minD = Number(cfg.min_discount_pct || 0); const minP = cfg.min_price != null ? Number(cfg.min_price) : 0; const maxP = cfg.max_price != null ? Number(cfg.max_price) : Infinity;
+  const skip = { invalido: 0, repetido: 0, sem_estoque: 0, usado: 0, sem_desconto: 0, fora_da_faixa: 0 }; const seen = new Set(); const list = [];
+  for (const it of items) {
+    if (!it.external_id || !it.url || !it.title || !(it.price > 0)) { skip.invalido++; continue; }
+    if (seen.has(it.external_id)) { skip.repetido++; continue; } seen.add(it.external_id);
+    if (it.used) { skip.usado++; continue; }
+    if (it.stock != null && it.stock <= 0) { skip.sem_estoque++; continue; }
+    if (minD > 0 && pctOff(it.price, it.previous) < minD) { skip.sem_desconto++; continue; }
+    if (it.price < minP || it.price > maxP) { skip.fora_da_faixa++; continue; }
+    list.push(it);
+  }
+  list.sort((a, b) => pctOff(b.price, b.previous) - pctOff(a.price, a.previous) || (b.sold || 0) - (a.sold || 0));
+  return { list: list.slice(0, limit), skip, eligible: list.length };
+}
+const affiliateUrl = (it, cfg) => {
+  if (it.affiliate_url) return it.affiliate_url;
+  const t = cfg.link_template; if (!t) return undefined;
+  const base = String(it.url).split('?')[0]; return t.split('{url}').join(/^\{url\}/.test(t) ? base : encodeURIComponent(base)).split('{id}').join(cfg.affiliate_id || '');
+};
+export async function collectStore(ctx, rt, provider, { dry = false, limit, maxTerms = 6 } = {}) {
+  const cfg = connectorOf(rt, provider).config || {}; const label = STORE_LABEL[provider]; need(label, 'Esta plataforma não tem coleta por API.');
+  need(credsOk(provider, cfg, rt.secrets), `Informe as credenciais do ${label} (Conectores → ${label} → Configurar).`);
+  if (provider === 'mercadolivre') need(rt.secrets.ml_refresh_token || rt.secrets.ml_access_token, 'Conecte a conta do Mercado Livre antes (botão “Conectar conta”).');
+  const max = Math.max(1, Math.min(Number(limit || cfg.max_items_per_run || 30), 100));
+  const runId = dry ? null : await ctx.rpc('start_run', { p_platform: provider });
+  try {
+    const g = await gather(ctx, rt, provider, cfg, maxTerms);
+    if (!g.items.length && g.errors.length) throw new Error(g.errors[0]);
+    const sel = selectOffers(g.items, cfg, max);
+    if (dry) return { ok: true, dry: true, seen: g.items.length, eligible: sel.eligible, skipped: sel.skip, errors: g.errors, items: sel.list.slice(0, 12).map(previewItem) };
+    let created = 0, duplicates = 0, rejected = 0, lowScore = 0; const reasons = {};
+    for (const it of sel.list) {
+      const res = (await ctx.rpc('ingest_offer', { p: { platform: provider, external_id: it.external_id, original_url: it.url, affiliate_url: affiliateUrl(it, cfg), title: it.title.slice(0, 300), price: it.price, previous_price: it.previous || undefined,
+        image_url: it.image || undefined, seller_name: it.seller || undefined, category: it.category, source_kind: 'api', source_layer: 'A', source_name: SOURCE_NAME[provider],
+        availability: it.stock != null ? 'in_stock' : 'unknown', observed_at: ctx.now().toISOString(), evidence: { termo: it.term, comissao_pct: it.commission_pct ?? undefined, vendidos: it.sold ?? undefined, preco_anterior_derivado: it.derived_previous || undefined } } })) || {};
+      if (res.status === 'created') {
+        if (cfg.min_score != null && res.score != null && res.score < Number(cfg.min_score)) { await ctx.rpc('reject_offer', { p_offer: res.offer_id, p_reason: `Abaixo do score mínimo do conector (${res.score} < ${cfg.min_score})` }).catch(() => {}); lowScore++; } else created++;
+      } else if (res.status === 'duplicate') duplicates++;
+      else { rejected++; for (const f of res.failures || []) reasons[f.code] = (reasons[f.code] || 0) + 1; }
+    }
+    await ctx.rpc('finish_run', { p_run: runId, p_status: g.errors.length ? 'partial' : 'success', p_seen: sel.list.length, p_accepted: created, p_rejected: rejected + lowScore, p_error: g.errors[0] || null });
+    return { ok: true, run_id: runId, seen: g.items.length, eligible: sel.eligible, selected: sel.list.length, created, duplicates, rejected, low_score: lowScore, reasons, skipped: sel.skip, errors: g.errors };
+  } catch (e) {
+    if (runId) await ctx.rpc('finish_run', { p_run: runId, p_status: 'error', p_seen: 0, p_accepted: 0, p_rejected: 0, p_error: clean(e && e.message) }).catch(() => {});
+    throw e;
+  }
+}
+// Coleta automática: no máximo uma loja por chamada (cabe no orçamento de tempo do ciclo de 1 minuto).
+export async function runCollectors(ctx) {
+  const rt = await loadRuntime(ctx); const out = {};
+  for (const p of ['mercadolivre', 'shopee', 'aliexpress', 'amazon']) {
+    const c = connectorOf(rt, p); if (c.mode !== 'api_ready') continue;
+    const every = Math.max(5, Number((c.config || {}).poll_minutes || 60)); const last = c.last_run_at ? new Date(c.last_run_at).getTime() : 0;
+    if (ctx.now().getTime() - last < every * 60000) continue;
+    try { const r = await collectStore(ctx, rt, p, { maxTerms: 4 }); out[p] = `${r.created} nova(s) de ${r.selected}`; } catch (e) { out[p] = 'erro: ' + clean(e && e.message).slice(0, 80); }
+    break;
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ Tarefas do painel */
@@ -269,7 +529,7 @@ export async function selfTest(ctx, rt) {
   const lim = ctx.limits || {};
   add('ratelimit', 'Limite de requisições nos webhooks', !!ctx.hasStore, ctx.hasStore ? `Ativo: até ${lim.webhookPorMin || 120} por minuto por webhook` : 'Indisponível neste n8n (sem memória do workflow): os webhooks ficam sem limite de taxa.', false);
   add('service_role', 'Chave do Supabase é a service_role', !env.key_role || env.key_role === 'service_role' || env.key_role === 'desconhecido', env.key_role === 'anon' ? 'Esta é a chave ANON: as tarefas vão falhar. Use a service_role.' : env.key_role ? `Papel da chave: ${env.key_role}` : '—', true);
-  const https = (u) => !u || /^https:\/\//i.test(u);
+  const https = (u) => !u || /^https:\/\//i.test(u) || /^http:\/\/[a-z0-9-]+:\d{2,5}\//i.test(u);
   add('https', 'Endereços usam HTTPS', https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url), https(ev.base_url) && https(ev.webhook_url) && https(tg.webhook_url) ? 'Tudo em HTTPS' : 'Há endereço sem HTTPS: a chave e as mensagens viajam sem proteção.', false);
   const lastSeg = (u) => { try { return parseUrl(u).pathname.split('/').filter(Boolean).pop() || ''; } catch { return ''; } };
   const weak = [ev.webhook_url, tg.webhook_url].filter(Boolean).filter((u) => lastSeg(u).length < 20);
@@ -369,9 +629,12 @@ async function integrationTask(ctx, rt, payload) {
     if (action === 'delete_webhook') { await bot.deleteWebhook(); return { webhook: null }; }
     if (action === 'send_test') { const r = await bot.send(payload.to, payload.text); if (!r.ok) throw new Error(r.error); return { sent: true, message_id: r.messageId }; }
   }
-  if (['mercadolivre', 'shopee', 'amazon'].includes(provider) && action === 'check') {
+  if (provider === 'mercadolivre' && action === 'exchange_code') return mlExchange(ctx, rt, payload);
+  if (provider === 'mercadolivre' && action === 'disconnect') return mlDisconnect(ctx, rt);
+  if (['mercadolivre', 'shopee', 'aliexpress', 'amazon'].includes(provider) && (action === 'preview' || action === 'collect')) return collectStore(ctx, rt, provider, { dry: action === 'preview' });
+  if (['mercadolivre', 'shopee', 'aliexpress', 'amazon', 'magalu'].includes(provider) && action === 'check') {
     const res = await checkStore(ctx, provider, rt);
-    await ctx.rpc('report_integration_status', { p_provider: provider, p_status: { ok: !!res.ok, partial: !!res.partial, detail: res.detail || null, error: res.error || null } });
+    await ctx.rpc('report_integration_status', { p_provider: provider, p_status: { ok: !!res.ok, partial: !!res.partial, connected: res.connected ?? null, account: res.account || null, detail: res.detail || null, error: res.error || null } });
     return res;
   }
   throw new Error('Ação não suportada pelo worker');

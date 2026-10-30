@@ -33,7 +33,7 @@ export const minutesLabel = (m: number | null | undefined) => {
 };
 
 export const platformName: Record<string, string> = {
-  mercadolivre: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon Brasil', network: 'Redes de afiliados',
+  mercadolivre: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon Brasil', aliexpress: 'AliExpress', magalu: 'Magalu', network: 'Redes de afiliados',
 };
 export const channelName: Record<string, string> = { telegram: 'Telegram', whatsapp: 'WhatsApp' };
 

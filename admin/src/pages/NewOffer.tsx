@@ -34,7 +34,7 @@ export default function NewOffer() {
       <div className="grid split">
         <Card><form className="col" onSubmit={submit}>
           <div className="grid g2">
-            <Field label="Plataforma"><select value={f.platform} onChange={(e) => set('platform', e.target.value as Platform)}>{(['mercadolivre', 'shopee', 'amazon'] as const).map((p) => <option key={p} value={p}>{platformName[p]}</option>)}</select></Field>
+            <Field label="Plataforma"><select value={f.platform} onChange={(e) => set('platform', e.target.value as Platform)}>{(['mercadolivre', 'shopee', 'amazon', 'aliexpress', 'magalu'] as const).map((p) => <option key={p} value={p}>{platformName[p]}</option>)}</select></Field>
             <Field label="Origem do dado" hint="Define o que o sistema aceita como preço anterior."><select value={f.source_kind} onChange={(e) => set('source_kind', e.target.value as SourceKind)}>{Object.entries(sourceLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           </div>
           <Field label="Título"><input required maxLength={300} value={f.title} onChange={(e) => set('title', e.target.value)} /></Field>

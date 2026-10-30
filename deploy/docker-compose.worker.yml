@@ -1,0 +1,27 @@
+# Worker da Central (substitui o n8n). Rode a partir da pasta deploy/:
+#   docker compose -f docker-compose.worker.yml --env-file worker/worker.env up -d --build
+# Aponte o Nginx Proxy Manager para promo-worker:8787 (ex.: https://worker.seudominio.com.br).
+# Os webhooks aparecem no log de inicialização: docker logs promo-worker
+services:
+  promo-worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: central-promocoes-worker:local
+    container_name: promo-worker
+    restart: unless-stopped
+    env_file: worker/worker.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - npm_proxy
+
+networks:
+  npm_proxy:
+    external: true
+    name: ${NPM_NETWORK:-hubly-network}

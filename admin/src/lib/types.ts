@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'operator' | 'viewer';
-export type Platform = 'mercadolivre' | 'shopee' | 'amazon';
+export type Platform = 'mercadolivre' | 'shopee' | 'amazon' | 'aliexpress' | 'magalu';
 export type Channel = 'telegram' | 'whatsapp';
 export type OfferStatus =
   | 'discovered' | 'needs_review' | 'approved' | 'scheduled' | 'published' | 'rejected' | 'expired';
@@ -278,12 +278,26 @@ export interface TemplateVersion { id: string; template_id: string; version: num
 export interface ConnectorConfig {
   affiliate_tag?: string; affiliate_id?: string; credential_ref?: string; poll_minutes?: number; max_items_per_run?: number;
   min_discount_pct?: number; min_score?: number; min_price?: number; max_price?: number; categories?: string[];
-  sources?: { name: string; url: string }[]; [k: string]: unknown;
+  sources?: { name: string; url: string }[]; keywords?: string[]; link_template?: string; [k: string]: unknown;
+}
+
+/* ---------- Contas de afiliado (012) ---------- */
+export interface StoreProduct { title: string; price: number; previous: number | null; discount_pct: number | null; url: string; image: string | null; seller: string | null; commission_pct: number | null; free_shipping?: boolean }
+export interface StoreAccount {
+  id: string; nickname?: string | null; site?: string | null; permalink?: string | null; level?: string | null; power_seller?: string | null; registered?: string | null;
+  kind?: 'affiliate_app' | 'associate'; tracking_id?: string; marketplace?: string; report?: { conversions: number; more: boolean; commission: number }; report_error?: string;
+}
+/** Estado da integração da loja (gravado pelo worker em int_status_<plataforma>). */
+export interface StoreStatus { ok?: boolean; partial?: boolean; connected?: boolean | null; account?: StoreAccount | null; detail?: string | null; error?: string | null; checked_at?: string }
+export interface StoreCheckResult extends StoreStatus { sample?: StoreProduct[]; search_error?: string }
+export interface CollectResult {
+  ok: boolean; dry?: boolean; seen: number; eligible: number; skipped: Record<string, number>; errors: string[]; items?: StoreProduct[];
+  selected?: number; created?: number; duplicates?: number; rejected?: number; low_score?: number; reasons?: Record<string, number>; run_id?: string;
 }
 
 /* ---------- Integrações (008) ---------- */
-export type IntProvider = 'evolution' | 'telegram' | 'n8n' | 'mercadolivre' | 'shopee' | 'amazon';
-export type SecretKey = 'evolution_api_key' | 'telegram_bot_token' | 'telegram_webhook_secret' | 'ml_client_secret' | 'shopee_secret' | 'amazon_client_secret' | 'supabase_management_token';
+export type IntProvider = 'evolution' | 'telegram' | 'n8n' | 'mercadolivre' | 'shopee' | 'amazon' | 'aliexpress' | 'magalu';
+export type SecretKey = 'evolution_api_key' | 'telegram_bot_token' | 'telegram_webhook_secret' | 'ml_client_secret' | 'shopee_secret' | 'amazon_client_secret' | 'aliexpress_app_secret' | 'supabase_management_token';
 /** O painel nunca recebe o valor de um segredo: só se existe e os 4 últimos caracteres. */
 export interface SecretInfo { key: SecretKey; is_set: boolean; hint: string | null; updated_at: string | null }
 export interface EvolutionConfig { base_url: string; instance: string; webhook_url: string; send_delay_min_s: number; send_delay_max_s: number; alert_numbers: string[]; alerts: boolean }

@@ -23,6 +23,14 @@ PN="$(grep -E '^NPM_NETWORK=' "$ENVF" | cut -d= -f2- || true)"; PN="${PN:-hubly-
 docker network inspect "$PN" >/dev/null 2>&1 || { log "ERRO: rede Docker '$PN' (a do Nginx Proxy Manager) não existe"; exit 1; }
 COMPOSE="${COMPOSE_FILE:-deploy/docker-compose.oracle.yml}"; [[ -f "$COMPOSE" ]] || COMPOSE="deploy/docker-compose.admin.yml"
 docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --build >>"$LOG" 2>&1 || { log "ERRO no build. Versão anterior segue no ar se o build falhou antes do 'up'. Veja $LOG"; exit 1; }
+# Worker (substitui o n8n): só sobe se deploy/worker/worker.env existir. Falha aqui não derruba o painel.
+WENV="$DIR/deploy/worker/worker.env"
+if [[ -f "$WENV" && -f deploy/docker-compose.worker.yml ]]; then
+  if docker compose -f deploy/docker-compose.worker.yml --env-file "$ENVF" up -d --build >>"$LOG" 2>&1; then
+    w=none; for i in {1..20}; do w="$(docker inspect -f '{{.State.Health.Status}}' promo-worker 2>/dev/null || echo none)"; [[ "$w" == "healthy" ]] && break; sleep 3; done
+    [[ "$w" == "healthy" ]] && log "OK: worker saudável" || log "AVISO: promo-worker não ficou 'healthy' (estado: $w). Veja: docker logs promo-worker"
+  else log "AVISO: erro ao subir o worker. Veja $LOG"; fi
+fi
 for i in {1..20}; do
   s="$(docker inspect -f '{{.State.Health.Status}}' promo-admin 2>/dev/null || echo none)"
   [[ "$s" == "healthy" ]] && { log "OK: painel saudável em $(git rev-parse --short HEAD)"; docker image prune -f >/dev/null 2>&1 || true; exit 0; }

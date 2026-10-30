@@ -112,8 +112,8 @@ export default function WhatsAppTab({ s, secrets, reload, isAdmin }: TabProps) {
 
       <Card title="3. Receber mensagens (webhook)" actions={st.webhook ? <Badge tone={(st.webhook as { matches?: boolean }).matches ? 'ok' : 'warn'}>{(st.webhook as { matches?: boolean }).matches ? 'configurado' : 'diferente do salvo'}</Badge> : undefined}>
         <fieldset disabled={!isAdmin} className="bare"><div className="col">
-          <div className="small muted">É assim que as conversas dos grupos aparecem em <b>WhatsApp → Conversas</b>. Cole abaixo o <i>Production URL</i> do nó “Webhook WhatsApp (Evolution)” do workflow no n8n, salve e depois use <b>Configurar webhook</b> no passo 2.</div>
-          <Field label="Endereço do webhook no n8n" hint="https://… Production URL do nó “Webhook Evolution”."><input value={f.webhook_url} onChange={(e) => setF({ ...f, webhook_url: e.target.value })} placeholder="https://automation.hubly.software/webhook/central-whatsapp-…" inputMode="url" /></Field>
+          <div className="small muted">É assim que as conversas dos grupos aparecem em <b>WhatsApp → Conversas</b>. Cole abaixo o endereço do webhook (do worker, ou o <i>Production URL</i> do n8n), salve e depois use <b>Configurar webhook</b> no passo 2. Com o worker no mesmo servidor use o endereço interno: <code>http://promo-worker:8787/hook/whatsapp-…</code> (aparece em <code>docker logs promo-worker</code>).</div>
+          <Field label="Endereço do webhook" hint="http://promo-worker:8787/hook/whatsapp-… (rede interna) ou https://… público."><input value={f.webhook_url} onChange={(e) => setF({ ...f, webhook_url: e.target.value })} placeholder="http://promo-worker:8787/hook/whatsapp-…" inputMode="url" /></Field>
           <div className="row wrap">
             <Button variant="primary" icon={<Save size={14} />} disabled={!dirty} busy={busy === 'save-evo'} onClick={save}>Salvar</Button>
           </div>

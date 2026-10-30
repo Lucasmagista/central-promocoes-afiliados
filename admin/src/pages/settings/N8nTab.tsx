@@ -72,10 +72,12 @@ export default function N8nTab({ s, reload, isAdmin }: TabProps) {
         </div>
       </section>
 
+      <div className="alert info"><div><b>O n8n é opcional.</b> Toda a lógica roda num arquivo só (<code>central-worker.mjs</code>), que também funciona como serviço próprio em Docker (<code>deploy/docker-compose.worker.yml</code>), sem importar workflow, sem variáveis bloqueadas e sem reimportar a cada atualização. O sinal de vida e os testes abaixo valem para os dois. Veja <code>docs/11-CONECTORES-E-DECISAO-N8N.md</code>.</div></div>
+
       <Card title="Do zero ao funcionando">
         <ol className="guide">
           <Step n={1} title="Variáveis no servidor do n8n" done={alive}>Defina as três variáveis da seção “Variáveis de ambiente” e reinicie o n8n.</Step>
-          <Step n={2} title="Migrações do banco até a 010" done={!!last.at}>No SQL Editor do Supabase, rode em ordem as migrações que ainda não rodou (a 009 e a 010 são as novas).</Step>
+          <Step n={2} title="Migrações do banco até a 013" done={!!last.at}>No SQL Editor do Supabase, rode em ordem as migrações que ainda não rodou (a 012 e a 013 trazem as contas do Mercado Livre, Shopee, Amazon e AliExpress).</Step>
           <Step n={3} title="Importar o arquivo completo" done={alive}>No n8n: Workflows → Import from file → <code>00-central-completo.json</code>.</Step>
           <Step n={4} title="Ativar o workflow" done={alive}>Chave “Active” no topo. O sinal de vida acima fica verde em até 1 minuto.</Step>
           <Step n={5} title="Rodar o autoteste" done={!!last.ok}>Use o primeiro teste logo abaixo.</Step>

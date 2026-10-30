@@ -43,7 +43,7 @@ begin
   perform test.fails($f$select public.set_integration_secret('evolution_api_key', 'abcdefghij1234567890')$f$, 'administrador');
   perform test.fails($f$select public.save_integration('evolution', '{"instance":"x1"}')$f$, 'administrador');
   perform test.fails($f$select public.request_integration_action('evolution', 'status')$f$, 'administrador');
-  assert jsonb_array_length(public.list_integration_secrets()) = 6, 'membros veem se está definido';
+  assert jsonb_array_length(public.list_integration_secrets()) = 7, 'membros veem se está definido';
   perform test.as_role('anon');
   perform test.fails($f$select public.list_integration_secrets()$f$, 'permission denied');
 

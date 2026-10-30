@@ -63,7 +63,9 @@ function seed(): DemoState {
   const connectors: Connector[] = [
     { id: 'c-ml', platform: 'mercadolivre', display_name: 'Mercado Livre', mode: 'manual_only', use_short_link: true, docs_reviewed_at: iso(-12 * DAY), review_due_at: iso(18 * DAY), last_success_at: iso(-3 * HOUR), last_error_at: null, last_error: null, notes: 'Entrada manual com link gerado no painel oficial do programa.', config: { affiliate_id: 'lucasmagista', poll_minutes: 60, min_discount_pct: 15, min_score: 60, max_items_per_run: 50, categories: ['eletronicos', 'informatica', 'casa'], credential_ref: 'ml-afiliados', sources: [{ name: 'Ofertas do dia', url: 'https://www.mercadolivre.com.br/ofertas' }] } },
     { id: 'c-sh', platform: 'shopee', display_name: 'Shopee', mode: 'api_pending', use_short_link: true, docs_reviewed_at: iso(-27 * DAY), review_due_at: iso(3 * DAY), last_success_at: null, last_error_at: null, last_error: null, notes: 'Aguardando liberação do acesso à API de afiliados.', config: { poll_minutes: 120, min_discount_pct: 20, categories: [] } },
-    { id: 'c-am', platform: 'amazon', display_name: 'Amazon Brasil', mode: 'manual_only', use_short_link: false, docs_reviewed_at: iso(-5 * DAY), review_due_at: iso(25 * DAY), last_success_at: iso(-1 * DAY), last_error_at: null, last_error: null, notes: 'Link curto desligado: confirmar regra do programa antes de usar redirecionador.', config: { affiliate_tag: 'lucas-20', poll_minutes: 90, min_discount_pct: 20, min_score: 70, max_price: 3000, categories: ['eletronicos', 'cozinha', 'casa'] } },
+    { id: 'c-am', platform: 'amazon', display_name: 'Amazon Brasil', mode: 'manual_only', use_short_link: false, docs_reviewed_at: iso(-5 * DAY), review_due_at: iso(25 * DAY), last_success_at: iso(-1 * DAY), last_error_at: null, last_error: null, notes: 'Link curto desligado: confirmar regra do programa antes de usar redirecionador.', config: { partner_tag: 'lucas-20', affiliate_tag: 'lucas-20', poll_minutes: 90, min_discount_pct: 20, min_score: 70, max_price: 3000, categories: ['eletronicos', 'cozinha', 'casa'] } },
+    { id: 'c-ae', platform: 'aliexpress', display_name: 'AliExpress', mode: 'disabled', use_short_link: true, docs_reviewed_at: null, review_due_at: null, last_success_at: null, last_error_at: null, last_error: null, notes: null, config: { poll_minutes: 180, min_discount_pct: 25 } },
+    { id: 'c-mg', platform: 'magalu', display_name: 'Magalu', mode: 'manual_only', use_short_link: true, docs_reviewed_at: iso(-8 * DAY), review_due_at: iso(22 * DAY), last_success_at: null, last_error_at: null, last_error: null, notes: 'Sem API pública de afiliados: ofertas entram manualmente com o link do painel do Parceiro Magalu.', config: { affiliate_id: 'lucas' } },
     { id: 'c-nw', platform: 'network', display_name: 'Redes de afiliados', mode: 'disabled', use_short_link: true, docs_reviewed_at: null, review_due_at: null, last_success_at: null, last_error_at: null, last_error: null, notes: null, config: {} },
   ];
   const destinations: Destination[] = [
@@ -86,7 +88,7 @@ function seed(): DemoState {
     int_telegram: { enabled: false, mode: 'polling', webhook_url: '', admin_chat_id: '', alerts: true },
     int_n8n: { base_url: '' },
     int_groups: { whatsapp: { only_admins_send: true, lock_info: true, ephemeral_seconds: 0, add_disclosure: true, add_batch_size: 20, add_delay_s: 6, invite_after_create: true }, telegram: { restrict_members_send: false, add_disclosure: true } },
-    allowed_domains: { mercadolivre: ['mercadolivre.com.br'], shopee: ['shopee.com.br'], amazon: ['amazon.com.br'] },
+    allowed_domains: { mercadolivre: ['mercadolivre.com.br'], shopee: ['shopee.com.br'], amazon: ['amazon.com.br', 'amzn.to'], aliexpress: ['aliexpress.com'], magalu: ['magazineluiza.com.br', 'magalu.com'] },
   };
 
   const offers: Offer[] = []; const observations: Record<string, PriceObservation[]> = {};
@@ -215,6 +217,27 @@ export function createDemoApi(): Api {
     return 'data:image/svg+xml;base64,' + btoa(sv + eye(0, 0) + eye(22, 0) + eye(0, 22) + '</svg>');
   };
   const secret = (k: SecretKey) => secrets.get(k);
+  let mlDemoConnected = false;
+  const DEMO_SAMPLE: Record<string, Record<string, unknown>[]> = {
+    mercadolivre: [
+      { title: 'Fone Bluetooth com cancelamento de ruído', price: 189.9, previous: 349.9, discount_pct: 45.7, url: 'https://www.mercadolivre.com.br/p/MLB1', image: null, seller: 'LOJA OFICIAL', commission_pct: null, free_shipping: true },
+      { title: 'SSD NVMe 1 TB', price: 329, previous: 499, discount_pct: 34.1, url: 'https://www.mercadolivre.com.br/p/MLB2', image: null, seller: 'TECH STORE', commission_pct: null, free_shipping: true },
+      { title: 'Air Fryer 5 L', price: 279.9, previous: 399.9, discount_pct: 30, url: 'https://www.mercadolivre.com.br/p/MLB3', image: null, seller: 'CASA & CIA', commission_pct: null },
+    ],
+    aliexpress: [
+      { title: 'Smartwatch com GPS e monitor cardíaco', price: 129.9, previous: 259.8, discount_pct: 50, url: 'https://pt.aliexpress.com/item/1005001.html', image: null, seller: null, commission_pct: 7.5 },
+      { title: 'Fone TWS Bluetooth 5.3', price: 39.9, previous: 79.8, discount_pct: 50, url: 'https://pt.aliexpress.com/item/1005002.html', image: null, seller: null, commission_pct: 7.5 },
+    ],
+    amazon: [
+      { title: 'Echo Dot 5ª geração', price: 249.9, previous: 449.9, discount_pct: 44.5, url: 'https://www.amazon.com.br/dp/B09B8V1LZ3', image: null, seller: 'Amazon.com.br', commission_pct: null },
+      { title: 'Kindle 11ª geração', price: 399, previous: 499, discount_pct: 20, url: 'https://www.amazon.com.br/dp/B09SWTJZH6', image: null, seller: 'Amazon.com.br', commission_pct: null },
+    ],
+    shopee: [
+      { title: 'Caixa de som portátil à prova d’água', price: 74.9, previous: 149.8, discount_pct: 50, url: 'https://shopee.com.br/product/9/55', image: null, seller: 'Loja Shopee Mall', commission_pct: 12 },
+      { title: 'Carregador turbo 65 W', price: 59.9, previous: 99.9, discount_pct: 40, url: 'https://shopee.com.br/product/9/56', image: null, seller: 'Eletro Plus', commission_pct: 9.5 },
+      { title: 'Mouse gamer sem fio', price: 89, previous: 129, discount_pct: 31, url: 'https://shopee.com.br/product/9/57', image: null, seller: 'Gamer Hub', commission_pct: 8 },
+    ],
+  };
   const demoIntegration = (provider: IntProvider, action: string, p: Record<string, unknown>): Record<string, unknown> => {
     const evo = s.settings.int_evolution as Record<string, unknown>, tg = s.settings.int_telegram as Record<string, unknown>;
     const report = (k: IntProvider, v: Record<string, unknown>) => { s.settings[`int_status_${k}`] = { ...v, checked_at: iso(0) }; };
@@ -262,6 +285,34 @@ export function createDemoApi(): Api {
       if (action === 'set_webhook') { if (!tg.webhook_url) ERR('Informe o endereço do webhook (aba Telegram).'); if (!secret('telegram_webhook_secret')) ERR('Gere o segredo do webhook antes.'); return { webhook: { url: tg.webhook_url, pending: 0, last_error: null } }; }
       if (action === 'delete_webhook') return { webhook: null };
       if (action === 'send_test') return { sent: true, message_id: 4242 };
+    }
+    if (provider === 'mercadolivre' && action === 'exchange_code') {
+      if (!secret('ml_client_secret')) ERR('Informe o App ID e a chave secreta do aplicativo do Mercado Livre antes de conectar.');
+      mlDemoConnected = true;
+      const account = { id: '482913775', nickname: 'LUCAS_AFILIADO', site: 'MLB', level: '5_green', power_seller: 'gold', permalink: 'https://perfil.mercadolivre.com.br/LUCAS_AFILIADO' };
+      report('mercadolivre', { ok: true, connected: true, account, detail: 'Conta conectada: LUCAS_AFILIADO.' }); return { ok: true, connected: true, account };
+    }
+    if (provider === 'mercadolivre' && action === 'disconnect') { mlDemoConnected = false; report('mercadolivre', { ok: false, connected: false, detail: 'Conta desconectada.' }); return { disconnected: true }; }
+    if (['mercadolivre', 'shopee', 'aliexpress', 'amazon'].includes(provider) && (action === 'preview' || action === 'collect')) {
+      if (provider === 'mercadolivre' && !mlDemoConnected) ERR('Conecte a conta do Mercado Livre antes (botão “Conectar conta”).');
+      const skipped = { invalido: 0, repetido: 3, sem_estoque: 4, usado: 6, sem_desconto: 21, fora_da_faixa: 0 };
+      if (action === 'preview') return { ok: true, dry: true, seen: 41, eligible: 7, skipped, errors: [], items: DEMO_SAMPLE[provider] };
+      s.runs.unshift({ id: uid(), platform: provider, started_at: iso(0), finished_at: iso(0), status: 'success', items_seen: 7, items_accepted: 5, items_rejected: 0, error_summary: null } as unknown as Run);
+      const c = s.connectors.find((x) => x.platform === provider); if (c) c.last_success_at = iso(0);
+      return { ok: true, seen: 41, eligible: 7, selected: 7, created: 5, duplicates: 2, rejected: 0, low_score: 0, reasons: {}, skipped, errors: [] };
+    }
+    if (['mercadolivre', 'shopee', 'aliexpress', 'amazon'].includes(provider) && action === 'check') {
+      const c = s.connectors.find((x) => x.platform === provider); const cfg = (c?.config ?? {}) as Record<string, unknown>;
+      const SK: Record<string, SecretKey> = { mercadolivre: 'ml_client_secret', shopee: 'shopee_secret', aliexpress: 'aliexpress_app_secret', amazon: 'amazon_client_secret' };
+      const amz = provider === 'amazon';
+      const miss = [!cfg[amz ? 'client_id' : 'app_id'] && (amz ? 'Credential ID' : 'App ID'), amz && !cfg.partner_tag && 'tag de associado', provider === 'aliexpress' && !(cfg.tracking_id || cfg.affiliate_id) && 'Tracking ID', !secret(SK[provider]) && 'chave secreta'].filter(Boolean);
+      if (miss.length) { const res = { ok: false, error: `Falta informar: ${miss.join(', ')}.` }; report(provider, res); return res; }
+      if (provider === 'mercadolivre' && !mlDemoConnected) { const res = { ok: true, partial: true, connected: false, detail: 'O aplicativo é válido. Falta autorizar a sua conta: clique em “Conectar conta”.' }; report(provider, res); return res; }
+      const account = provider === 'mercadolivre' ? { id: '482913775', nickname: 'LUCAS_AFILIADO', site: 'MLB', level: '5_green', power_seller: 'gold', permalink: 'https://perfil.mercadolivre.com.br/LUCAS_AFILIADO' }
+        : provider === 'shopee' ? { id: String(cfg.app_id), kind: 'affiliate_app', report: { conversions: 14, more: false, commission: 187.4 } }
+        : amz ? { id: String(cfg.partner_tag), kind: 'associate', marketplace: 'www.amazon.com.br' } : { id: String(cfg.app_id), kind: 'affiliate_app', tracking_id: String(cfg.tracking_id ?? cfg.affiliate_id) };
+      const res = { ok: true, connected: true, account, detail: provider === 'mercadolivre' ? 'Conectado como LUCAS_AFILIADO.' : 'Credenciais aceitas (demonstração: nenhum servidor real foi consultado).', sample: DEMO_SAMPLE[provider] };
+      report(provider, { ok: true, connected: true, account, detail: res.detail }); return res;
     }
     if (action === 'check') {
       const c = s.connectors.find((x) => x.platform === provider); const cfg = (c?.config ?? {}) as Record<string, unknown>;
@@ -664,7 +715,7 @@ export function createDemoApi(): Api {
 
     /* ---- Integrações (simuladas: nenhum servidor real é contatado) ---- */
     async listIntegrationSecrets() {
-      const keys: SecretKey[] = ['evolution_api_key', 'telegram_bot_token', 'telegram_webhook_secret', 'ml_client_secret', 'shopee_secret', 'amazon_client_secret', 'supabase_management_token'];
+      const keys: SecretKey[] = ['evolution_api_key', 'telegram_bot_token', 'telegram_webhook_secret', 'ml_client_secret', 'shopee_secret', 'amazon_client_secret', 'aliexpress_app_secret', 'supabase_management_token'];
       return wait(keys.map((key): SecretInfo => { const v = secrets.get(key); return { key, is_set: !!v, hint: v?.hint ?? null, updated_at: v?.at ?? null }; }), 80);
     },
     async setIntegrationSecret(key, value) {
@@ -672,7 +723,7 @@ export function createDemoApi(): Api {
       if (/\s/.test(v)) ERR('O valor não pode ter espaços ou quebras de linha');
       if (key === 'telegram_bot_token' && !/^\d{6,12}:[A-Za-z0-9_-]{30,50}$/.test(v)) ERR('Token do bot inválido. O formato é 123456789:AAxxxxxxxx (copie do @BotFather)');
       if (key === 'evolution_api_key' && (v.length < 12 || v.length > 200)) ERR('A chave da Evolution deve ter de 12 a 200 caracteres');
-      if (['ml_client_secret', 'shopee_secret', 'amazon_client_secret'].includes(key) && !/^[A-Za-z0-9_.+=/-]{16,200}$/.test(v)) ERR('Chave secreta inválida (16 a 200 caracteres, sem espaços)');
+      if (['ml_client_secret', 'shopee_secret', 'aliexpress_app_secret'].includes(key) && !/^[A-Za-z0-9_.+=/-]{16,200}$/.test(v)) ERR('Chave secreta inválida (16 a 200 caracteres, sem espaços)');
       secrets.set(key, { hint: v.slice(-4), at: iso(0) }); audit('integration_secret_set', 'integration', key); await wait(null, 120);
     },
     async clearIntegrationSecret(key) { needAdmin(); secrets.delete(key); audit('integration_secret_cleared', 'integration', key); await wait(null, 80); },
@@ -682,7 +733,7 @@ export function createDemoApi(): Api {
       for (const k of Object.keys(config)) if (!(k in cur)) ERR(`Campo desconhecido: ${k}`);
       const https = (u: unknown, nome: string) => { if (u && !/^https:\/\/[^\s/]+\.[^\s/]+(\/\S*)?$/i.test(String(u))) ERR(`${nome}: use um endereço https:// completo`); };
       if (provider === 'evolution') {
-        https(config.base_url, 'Endereço da Evolution'); https(config.webhook_url, 'Webhook');
+        https(config.base_url, 'Endereço da Evolution'); if (config.webhook_url && !/^http:\/\/[a-z0-9-]+:\d{2,5}(\/\S*)?$/i.test(String(config.webhook_url))) https(config.webhook_url, 'Webhook');
         if (config.instance !== undefined && config.instance !== '' && !/^[A-Za-z0-9_-]{2,60}$/.test(String(config.instance))) ERR('Nome da instância: 2 a 60 caracteres (letras, números, - e _)');
         const lo = Number(config.send_delay_min_s ?? cur.send_delay_min_s), hi = Number(config.send_delay_max_s ?? cur.send_delay_max_s);
         if (lo < 1 || hi > 120 || lo > hi) ERR('Intervalo entre envios inválido (mínimo 1 s, máximo 120 s, e o mínimo não pode passar do máximo)');

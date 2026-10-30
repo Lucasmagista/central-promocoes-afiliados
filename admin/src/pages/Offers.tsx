@@ -46,7 +46,7 @@ export default function Offers() {
           <div className="row" style={{ position: 'relative' }}><Search size={15} style={{ position: 'absolute', left: 10, color: 'var(--muted)' }} />
             <input aria-label="Buscar por título" style={{ paddingLeft: 32 }} placeholder="Buscar por título" value={text} onChange={(e) => setText(e.target.value)} /></div>
           <select aria-label="Filtrar por status" value={status} onChange={(e) => setStatus(e.target.value as S | 'all')}><option value="all">Todos os status</option>{Object.entries(offerStatusLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-          <select aria-label="Filtrar por plataforma" value={platform} onChange={(e) => setPlatform(e.target.value as Platform | 'all')}><option value="all">Todas as plataformas</option>{(['mercadolivre', 'shopee', 'amazon'] as const).map((p) => <option key={p} value={p}>{platformName[p]}</option>)}</select>
+          <select aria-label="Filtrar por plataforma" value={platform} onChange={(e) => setPlatform(e.target.value as Platform | 'all')}><option value="all">Todas as plataformas</option>{(['mercadolivre', 'shopee', 'amazon', 'aliexpress', 'magalu'] as const).map((p) => <option key={p} value={p}>{platformName[p]}</option>)}</select>
         </div>
         {sel.count > 0 && <div className="bulkbar" role="status"><span>{sel.count} selecionada(s)</span>
           {canOperate && <Button size="sm" icon={<XCircle size={15} />} disabled={rejectable.length === 0} busy={busy === 'bulk'} onClick={bulkReject}>Rejeitar {rejectable.length || ''}</Button>}

@@ -18,3 +18,4 @@ secrets/
 _to_delete
 # Segredos do servidor (nunca versionar)
 deploy/admin.env
+deploy/worker/worker.env

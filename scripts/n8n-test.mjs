@@ -91,17 +91,71 @@ const tgSrv = await listen(async (req, res) => {
 });
 
 /* ---------- Mercado Livre e Shopee falsos ---------- */
+const mlState = { access: ML_ACCESS, refresh: 'ref' + rnd(20), refreshCalls: 0, searchStatus: 200 };
 const ml = await listen(async (req, res) => {
   const body = await readBody(req);
-  if (req.url === '/oauth/token') { const f = new URLSearchParams(body); if (f.get('client_id') === '111' && f.get('client_secret') === ML_SECRET) return send(res, 200, { access_token: ML_ACCESS, expires_in: 21600 }); return send(res, 400, { message: 'invalid_client' }); }
-  if (req.url.startsWith('/sites/MLB/search')) return req.headers.authorization === 'Bearer ' + ML_ACCESS ? send(res, 200, { results: [{}] }) : send(res, 403, { message: 'forbidden' });
+  if (req.url === '/oauth/token') {
+    const f = new URLSearchParams(body); const good = f.get('client_id') === '111' && f.get('client_secret') === ML_SECRET;
+    if (!good) return send(res, 400, { message: 'invalid_client' });
+    if (f.get('grant_type') === 'client_credentials') return send(res, 200, { access_token: ML_ACCESS, expires_in: 21600 });
+    if (f.get('grant_type') === 'authorization_code') { if (f.get('code') !== 'CODEOK1234567' || f.get('redirect_uri') !== 'https://painel.exemplo.com/oauth/mercadolivre') return send(res, 400, { message: 'invalid_grant' }); return send(res, 200, { access_token: ML_ACCESS, refresh_token: mlState.refresh, expires_in: 21600, user_id: 99 }); }
+    if (f.get('grant_type') === 'refresh_token') { if (f.get('refresh_token') !== mlState.refresh) return send(res, 400, { message: 'invalid_grant' }); mlState.refreshCalls++; mlState.refresh = 'ref' + rnd(20); mlState.access = 'acc' + rnd(16); return send(res, 200, { access_token: mlState.access, refresh_token: mlState.refresh, expires_in: 21600 }); }
+    return send(res, 400, { message: 'unsupported_grant_type' });
+  }
+  const authed = req.headers.authorization === 'Bearer ' + ML_ACCESS || req.headers.authorization === 'Bearer ' + mlState.access;
+  if (req.url === '/users/me') return authed ? send(res, 200, { id: 99, nickname: 'LUCAS_AFILIADO', site_id: 'MLB', permalink: 'https://perfil.mercadolivre.com.br/LUCAS_AFILIADO', seller_reputation: { level_id: '5_green', power_seller_status: 'gold' } }) : send(res, 401, { message: 'invalid_token' });
+  if (req.url.startsWith('/sites/MLB/search')) {
+    if (!authed) return send(res, 403, { message: 'forbidden' });
+    if (mlState.searchStatus !== 200) return send(res, mlState.searchStatus, { message: 'blocked' });
+    return send(res, 200, { results: [
+      { id: 'MLB1', title: 'Fone Bluetooth Bom', price: 80, original_price: 160, permalink: 'https://produto.mercadolivre.com.br/MLB-1-fone', thumbnail: 'http://http2.mlstatic.com/D_1-I.jpg', available_quantity: 5, condition: 'new', seller: { nickname: 'LOJA' }, sold_quantity: 200 },
+      { id: 'MLB2', title: 'Fone Sem Desconto', price: 50, original_price: null, permalink: 'https://produto.mercadolivre.com.br/MLB-2-fone', available_quantity: 5, condition: 'new' },
+      { id: 'MLB3', title: 'Fone Usado', price: 20, original_price: 100, permalink: 'https://produto.mercadolivre.com.br/MLB-3-fone', available_quantity: 1, condition: 'used' },
+      { id: 'MLB4', title: 'Fone Esgotado', price: 20, original_price: 100, permalink: 'https://produto.mercadolivre.com.br/MLB-4-fone', available_quantity: 0, condition: 'new' },
+      { id: 'MLB1', title: 'Fone Bluetooth Bom (repetido)', price: 80, original_price: 160, permalink: 'https://produto.mercadolivre.com.br/MLB-1-fone', available_quantity: 5, condition: 'new' },
+    ] });
+  }
   send(res, 404, {});
 });
+const spState = { queries: [] };
 const shopee = await listen(async (req, res) => {
   const body = await readBody(req); const a = /Credential=([^,]+), Timestamp=(\d+), Signature=(\w+)/.exec(req.headers.authorization || '');
   const expect = a && crypto.createHash('sha256').update(a[1] + a[2] + body + SP_SECRET).digest('hex');
   if (!a || a[3] !== expect) return send(res, 200, { errors: [{ message: 'Invalid Signature', extensions: { code: 10020 } }] });
-  send(res, 200, { data: { productOfferV2: { nodes: [{ itemId: '1', productName: 'x', offerLink: 'https://s.shopee.com.br/x' }] } } });
+  const q = String(JSON.parse(body).query); spState.queries.push(q);
+  if (q.includes('conversionReport')) return send(res, 200, { data: { conversionReport: { nodes: [{ totalCommission: '12.50' }, { totalCommission: '7.50' }], pageInfo: { hasNextPage: false } } } });
+  send(res, 200, { data: { productOfferV2: { nodes: [
+    { itemId: '55', shopId: '9', productName: 'Caixa de Som', price: '75.00', priceDiscountRate: 50, commissionRate: '0.12', sales: 900, imageUrl: 'https://down-br.img.susercontent.com/file/x', shopName: 'Loja Shopee', productLink: 'https://shopee.com.br/product/9/55', offerLink: 'https://s.shopee.com.br/abc' },
+    { itemId: '56', shopId: '9', productName: 'Sem desconto', price: '40.00', priceDiscountRate: 0, commissionRate: '0.05', productLink: 'https://shopee.com.br/product/9/56', offerLink: 'https://s.shopee.com.br/def' },
+  ] } } });
+});
+
+/* ---------- AliExpress e Amazon falsas ---------- */
+const AL_SECRET = 'al' + rnd(30), AMZ_SECRET = 'amz' + rnd(30); const alState = { calls: [] };
+const ali = await listen(async (req, res) => {
+  const f = Object.fromEntries(new URLSearchParams(await readBody(req))); alState.calls.push(f);
+  const { sign, ...rest } = f; const base = Object.keys(rest).sort().map((k) => k + rest[k]).join('');
+  if (f.app_key !== 'ALIKEY1' || sign !== crypto.createHmac('sha256', AL_SECRET).update(base).digest('hex').toUpperCase()) return send(res, 200, { error_response: { code: 'IncompleteSignature', msg: 'The request signature does not conform to platform standards' } });
+  if (!f.tracking_id) return send(res, 200, { aliexpress_affiliate_product_query_response: { resp_result: { resp_code: 200, result: { products: { product: [] } } } } });
+  send(res, 200, { aliexpress_affiliate_product_query_response: { resp_result: { resp_code: 200, resp_msg: 'ok', result: { products: { product: [
+    { product_id: 1005001, product_title: 'Fone TWS', target_sale_price: '39.90', target_original_price: '79.80', promotion_link: 'https://s.click.aliexpress.com/e/_abc', product_main_image_url: 'https://ae01.alicdn.com/kf/x.jpg', commission_rate: '7.5%', lastest_volume: 3000, evaluate_rate: '96.1%' },
+    { product_id: 1005002, product_title: 'Sem desconto', target_sale_price: '20.00', target_original_price: '20.00', promotion_link: 'https://s.click.aliexpress.com/e/_def' },
+  ] } } } } });
+});
+const amzState = { tokenCalls: 0, searches: [] };
+const amz = await listen(async (req, res) => {
+  const body = JSON.parse((await readBody(req)) || '{}');
+  if (req.url === '/token') { amzState.tokenCalls++; return body.client_id === 'CRED1' && body.client_secret === AMZ_SECRET && body.scope === 'creatorsapi::default' && body.grant_type === 'client_credentials' ? send(res, 200, { access_token: 'amztok', expires_in: 3600 }) : send(res, 400, { error: 'invalid_client' }); }
+  if (req.url === '/catalog/v1/searchItems') {
+    if (req.headers.authorization !== 'Bearer amztok') return send(res, 401, { errors: [{ code: 'Unauthorized', message: 'token inválido' }] });
+    amzState.searches.push({ body, mkt: req.headers['x-marketplace'] });
+    return send(res, 200, { searchResult: { items: [
+      { asin: 'B0TEST0001', detailPageURL: 'https://www.amazon.com.br/dp/B0TEST0001?tag=lucas-20', itemInfo: { title: { displayValue: 'Echo Dot' } }, images: { primary: { large: { url: 'https://m.media-amazon.com/images/I/x.jpg' } } },
+        offersV2: { listings: [{ isBuyBoxWinner: true, merchantInfo: { name: 'Amazon.com.br' }, availability: { type: 'IN_STOCK' }, price: { money: { amount: 249.9 }, savingBasis: { money: { amount: 449.9 } }, savings: { percentage: 44 } } }] } },
+      { asin: 'B0TEST0002', detailPageURL: 'https://www.amazon.com.br/dp/B0TEST0002?tag=lucas-20', itemInfo: { title: { displayValue: 'Sem oferta' } }, offersV2: { listings: [] } },
+    ] } });
+  }
+  send(res, 404, {});
 });
 
 /* ---------- Supabase falso (em memória) com checagem de contrato ---------- */
@@ -112,7 +166,7 @@ const db = {
   evolution: { base_url: evoSrv.url, instance: 'central', webhook_url: 'https://n8n.exemplo.com/webhook/wa', send_delay_min_s: 1, send_delay_max_s: 1, alerts: true },
   telegram: { enabled: true, mode: 'polling', webhook_url: 'https://n8n.exemplo.com/webhook/tg', admin_chat_id: '555', alerts: true },
   groups: { whatsapp: { only_admins_send: true, lock_info: true, ephemeral_seconds: 604800, add_disclosure: true, add_batch_size: 2, add_delay_s: 2, invite_after_create: true }, telegram: {} }, disclosure: 'Link de afiliado: posso receber comissão.',
-  status: {}, jobs: [], pubs: [], outbox: [], tests: [], ingested: [], calls: [], completed: {}, failed: {}, pubResults: [],
+  status: {}, runs: [], offers: [], rejectedOffers: [], jobs: [], pubs: [], outbox: [], tests: [], ingested: [], calls: [], completed: {}, failed: {}, pubResults: [],
   connectors: { shopee: { mode: 'api_ready', config: { app_id: 'APP1', api_endpoint: null } }, mercadolivre: { mode: 'api_pending', config: { app_id: '111' } }, amazon: { mode: 'disabled', config: {} } },
 };
 const unchecked = new Set();
@@ -135,6 +189,11 @@ const rpc = async (name, args) => {
     case 'fail_chat_outbox': db.failed[args.p_id] = args.p_error; return null;
     case 'claim_destination_test': return db.tests.shift() || null;
     case 'complete_destination_test': db.completed['t' + args.p_test] = args.p_ok; return null;
+    case 'store_integration_token': if (args.p_value) db.secrets[args.p_key] = args.p_value; else delete db.secrets[args.p_key]; return null;
+    case 'start_run': db.runs.push({ platform: args.p_platform, status: 'running' }); return 'run' + db.runs.length;
+    case 'finish_run': Object.assign(db.runs[Number(String(args.p_run).slice(3)) - 1], { status: args.p_status, seen: args.p_seen, accepted: args.p_accepted, rejected: args.p_rejected, error: args.p_error }); return null;
+    case 'ingest_offer': { db.offers.push(args.p); const dup = db.offers.filter((o) => o.external_id === args.p.external_id).length > 1; return dup ? { status: 'duplicate', reason: 'open_offer' } : args.p.platform === 'shopee' && args.p.title === 'Caixa de Som' && db.rejectShopee ? { status: 'rejected', failures: [{ code: 'domain_not_allowed' }] } : { status: 'created', offer_id: 'of' + db.offers.length, score: db.score ?? 80 }; }
+    case 'reject_offer': db.rejectedOffers.push(args.p_offer); return null;
     case 'ingest_chat_message': db.ingested.push(args.p); return { status: 'created' };
     default: return null;
   }
@@ -142,7 +201,7 @@ const rpc = async (name, args) => {
 
 /* ---------- ctx de teste ---------- */
 const ctx = {
-  rpc, urls: { telegram: tgSrv.url, ml: ml.url }, now: () => new Date(), rand: () => 0, log: () => {}, sleep: async () => {},
+  rpc, urls: { telegram: tgSrv.url, ml: ml.url, amazon: amz.url, amazonToken: amz.url + '/token' }, now: () => new Date(), rand: () => 0, log: () => {}, sleep: async () => {},
   sha256hex: async (t) => crypto.createHash('sha256').update(t).digest('hex'),
   http: async (o) => {
     let body = o.body; const headers = { ...(o.headers || {}) };
@@ -427,7 +486,128 @@ sbSrv.s.close();
 const used = [...new Set(db.calls)]; const missing = used.filter((n) => !params[n]);
 ok(missing.length === 0, 'contrato: toda função RPC usada existe nas migrações' + (missing.length ? ' — faltam: ' + missing.join(', ') : ''));
 
-for (const s of [evoSrv, tgSrv, ml, shopee]) s.s.close();
+
+/* ---------- Contas de afiliado: Mercado Livre (OAuth), Shopee e coleta ---------- */
+console.log('\n— contas de afiliado —');
+delete db.secrets.ml_refresh_token; delete db.secrets.ml_access_token;
+db.connectors.mercadolivre = { mode: 'api_ready', config: { app_id: '111', redirect_uri: 'https://painel.exemplo.com/oauth/mercadolivre', min_discount_pct: 20, categories: ['eletronicos'], keywords: ['fone'] } };
+j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.status === 'done' && j.result.ok === true && j.result.connected === false && j.result.partial === true, 'ML: sem conta conectada só valida o aplicativo e pede para conectar');
+j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
+ok(j.status === 'failed' && /Conecte a conta/.test(j.error), 'ML: coleta sem conta conectada é recusada com instrução');
+j = job('integration', null, { provider: 'mercadolivre', action: 'exchange_code', code: 'CODEERRADO12345', redirect_uri: 'https://painel.exemplo.com/oauth/mercadolivre' }); await W.runJobs(ctx);
+ok(j.status === 'failed' && /não aceitou a autorização/.test(j.error) && !JSON.stringify(j).includes(ML_SECRET), 'ML: código inválido é explicado e nenhum segredo vaza');
+j = job('integration', null, { provider: 'mercadolivre', action: 'exchange_code', code: 'CODEOK1234567', redirect_uri: 'https://painel.exemplo.com/oauth/mercadolivre' }); await W.runJobs(ctx);
+ok(j.status === 'done' && j.result.account.nickname === 'LUCAS_AFILIADO', 'ML: código trocado por tokens e conta lida (/users/me)');
+ok(db.secrets.ml_access_token === ML_ACCESS && db.secrets.ml_refresh_token === mlState.refresh && Number(db.secrets.ml_token_expires_at) > Date.now() / 1000, 'ML: tokens e validade guardados no cofre');
+ok(db.status.mercadolivre.connected === true && db.status.mercadolivre.account.nickname === 'LUCAS_AFILIADO' && !JSON.stringify(db.status.mercadolivre).includes(ML_ACCESS), 'ML: status mostra a conta, sem token');
+j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.connected === true && j.result.sample.length >= 1 && j.result.sample[0].discount_pct === 50, 'ML: teste devolve conta e amostra real com desconto');
+j = job('integration', null, { provider: 'mercadolivre', action: 'preview' }); await W.runJobs(ctx);
+ok(j.result.dry === true && j.result.items.length === 1 && j.result.items[0].title === 'Fone Bluetooth Bom' && db.offers.length === 0, 'ML: prévia mostra só o que passa nos filtros e não grava nada');
+ok(j.result.skipped.sem_desconto === 1 && j.result.skipped.usado === 1 && j.result.skipped.sem_estoque === 1 && j.result.skipped.repetido === 1, 'ML: filtros explicam o que foi descartado (sem desconto, usado, sem estoque, repetido)');
+j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
+ok(j.status === 'done' && j.result.created === 1 && db.offers.length === 1 && db.offers[0].source_kind === 'api' && db.offers[0].previous_price === 160 && db.offers[0].image_url.startsWith('https://') && db.offers[0].image_url.endsWith('-O.jpg'), 'ML: coleta entrega a oferta à fila de revisão (fonte API, preço anterior da API, imagem https)');
+ok(db.runs.at(-1).status === 'success' && db.runs.at(-1).accepted === 1, 'ML: execução registrada com resultado');
+j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
+ok(j.result.created === 0 && j.result.duplicates === 1, 'ML: segunda coleta não duplica a oferta');
+db.offers = []; db.connectors.mercadolivre.config.min_score = 90; db.score = 60;
+j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
+ok(j.result.created === 0 && j.result.low_score === 1 && db.rejectedOffers.length === 1, 'ML: oferta abaixo do score mínimo é rejeitada automaticamente');
+delete db.connectors.mercadolivre.config.min_score; db.score = 80; db.offers = [];
+db.connectors.mercadolivre.config.link_template = '{url}?matt_tool=lucas';
+j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
+ok(db.offers[0].affiliate_url === 'https://produto.mercadolivre.com.br/MLB-1-fone?matt_tool=lucas', 'ML: link de afiliado montado pelo modelo configurado');
+delete db.connectors.mercadolivre.config.link_template; db.offers = [];
+// renovação automática do token (expira em < 5 min)
+db.secrets.ml_token_expires_at = String(Math.floor(Date.now() / 1000) + 60); const oldRef = db.secrets.ml_refresh_token;
+j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.connected === true && mlState.refreshCalls === 1 && db.secrets.ml_refresh_token !== oldRef && db.secrets.ml_refresh_token === mlState.refresh, 'ML: token perto de vencer é renovado e o novo refresh_token é guardado');
+// refresh_token inválido: pede para conectar de novo
+db.secrets.ml_token_expires_at = '1'; db.secrets.ml_refresh_token = 'invalido' + rnd(10);
+j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === false && /Conecte a conta de novo/.test(j.result.error) && db.status.mercadolivre.ok === false, 'ML: renovação recusada vira aviso para reconectar');
+db.secrets.ml_refresh_token = mlState.refresh; db.secrets.ml_access_token = mlState.access; db.secrets.ml_token_expires_at = String(Math.floor(Date.now() / 1000) + 3600);
+mlState.searchStatus = 403; j = job('integration', null, { provider: 'mercadolivre', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === true && j.result.partial === true && /403/.test(j.result.search_error), 'ML: conta conectada mas busca bloqueada vira "atenção" explicando o 403');
+j = job('integration', null, { provider: 'mercadolivre', action: 'collect' }); await W.runJobs(ctx);
+ok(j.status === 'failed' && db.runs.at(-1).status === 'error', 'ML: falha na coleta registra execução com erro');
+mlState.searchStatus = 200;
+j = job('integration', null, { provider: 'mercadolivre', action: 'disconnect' }); await W.runJobs(ctx);
+ok(j.result.disconnected === true && !db.secrets.ml_access_token && !db.secrets.ml_refresh_token && db.status.mercadolivre.connected === false, 'ML: desconectar apaga os tokens do cofre');
+
+db.connectors.shopee = { mode: 'api_ready', config: { app_id: 'APP1', api_endpoint: shopee.url, min_discount_pct: 10, keywords: ['caixa de som'] } };
+j = job('integration', null, { provider: 'shopee', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.connected === true && j.result.sample[0].commission_pct === 12 && j.result.account.report.commission === 20 && j.result.account.report.conversions === 2, 'Shopee: teste devolve amostra com comissão e o relatório de 30 dias');
+j = job('integration', null, { provider: 'shopee', action: 'collect' }); await W.runJobs(ctx);
+ok(j.result.created === 1 && db.offers.at(-1).affiliate_url === 'https://s.shopee.com.br/abc' && db.offers.at(-1).external_id === '9.55' && db.offers.at(-1).previous_price === 150, 'Shopee: oferta entra com o link rastreado da própria API e o preço anterior derivado do desconto');
+ok(db.offers.at(-1).evidence.preco_anterior_derivado === true && db.offers.at(-1).evidence.comissao_pct === 12, 'Shopee: evidência registra que o preço anterior foi derivado e a comissão');
+ok(spState.queries.every((q) => !q.includes('$')), 'Shopee: consultas sem variáveis (não dependem de nomes de tipos do schema)');
+
+// coleta automática
+db.offers = []; db.runs = []; db.connectors.mercadolivre.mode = 'disabled'; db.connectors.shopee.config.poll_minutes = 60; delete db.connectors.shopee.last_run_at;
+let col = await W.runCollectors(ctx);
+ok(/1 nova/.test(col.shopee || '') && db.runs.length === 1, 'coleta automática: conector api_ready sem execução recente coleta');
+db.connectors.shopee.last_run_at = new Date().toISOString(); db.runs = [];
+col = await W.runCollectors(ctx);
+ok(Object.keys(col).length === 0 && db.runs.length === 0, 'coleta automática: respeita o intervalo (poll_minutes)');
+db.connectors.shopee.last_run_at = new Date(Date.now() - 2 * 3600000).toISOString(); db.connectors.shopee.mode = 'manual_only';
+col = await W.runCollectors(ctx);
+ok(Object.keys(col).length === 0, 'coleta automática: só roda em modo "API pronta"');
+db.connectors.shopee.mode = 'api_ready';
+db.secrets.shopee_secret = 'errado' + rnd(20); db.connectors.shopee.last_run_at = undefined;
+col = await W.runCollectors(ctx);
+ok(/erro/.test(col.shopee) && db.runs.at(-1).status === 'error', 'coleta automática: credencial recusada registra execução com erro');
+db.secrets.shopee_secret = SP_SECRET;
+ok(W.selectOffers([{ external_id: 'a', url: 'u', title: 't', price: 10, previous: 20 }], { min_discount_pct: 60 }, 5).skip.sem_desconto === 1, 'filtro: desconto mínimo exige preço anterior comprovado');
+
+/* ---------- AliExpress, Amazon (Creators API) e Magalu ---------- */
+console.log('\n— novas plataformas —');
+ok(W.hmacSha256Hex('chave', 'mensagem ação ✓') === crypto.createHmac('sha256', 'chave').update('mensagem ação ✓').digest('hex'), 'HMAC-SHA256 puro confere com o do Node');
+ok(W.hmacSha256Hex('k'.repeat(100), 'x') === crypto.createHmac('sha256', 'k'.repeat(100)).update('x').digest('hex'), 'HMAC com chave maior que o bloco confere');
+db.offers = []; db.runs = [];
+db.connectors.aliexpress = { mode: 'api_ready', config: { app_id: 'ALIKEY1', api_endpoint: ali.url, tracking_id: 'trk1', min_discount_pct: 20, keywords: ['fone'] } };
+db.secrets.aliexpress_app_secret = 'errado' + rnd(20);
+j = job('integration', null, { provider: 'aliexpress', action: 'check' }); await W.runJobs(ctx);
+ok(j.status === 'failed' && /IncompleteSignature/.test(j.error) && !j.error.includes(AL_SECRET), 'AliExpress: assinatura errada é explicada sem vazar segredo');
+db.secrets.aliexpress_app_secret = AL_SECRET;
+j = job('integration', null, { provider: 'aliexpress', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.connected === true && j.result.sample[0].commission_pct === 7.5 && j.result.sample[0].discount_pct === 50, 'AliExpress: assinatura HMAC aceita e amostra com comissão');
+ok(alState.calls.at(-1).sign_method === 'sha256' && alState.calls.at(-1).target_currency === 'BRL' && alState.calls.at(-1).ship_to_country === 'BR' && alState.calls.at(-1).tracking_id === 'trk1', 'AliExpress: pede preços em BRL para o Brasil com o tracking id');
+j = job('integration', null, { provider: 'aliexpress', action: 'collect' }); await W.runJobs(ctx);
+ok(j.result.created === 1 && db.offers[0].affiliate_url === 'https://s.click.aliexpress.com/e/_abc' && db.offers[0].original_url === 'https://pt.aliexpress.com/item/1005001.html' && db.offers[0].previous_price === 79.8 && db.offers[0].source_name === 'AliExpress Affiliate API', 'AliExpress: oferta entra com link de afiliado da própria API');
+db.connectors.aliexpress.config = { app_id: 'ALIKEY1', api_endpoint: ali.url };
+j = job('integration', null, { provider: 'aliexpress', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === false && /Tracking ID/.test(j.result.error), 'AliExpress: sem Tracking ID pede para informar');
+
+db.offers = []; db.runs = [];
+db.connectors.amazon = { mode: 'api_ready', config: { client_id: 'CRED1', partner_tag: 'lucas-20', marketplace: 'www.amazon.com.br', credential_version: '3.1', min_discount_pct: 20, keywords: ['echo dot'] } };
+db.secrets.amazon_client_secret = 'errado' + rnd(20);
+j = job('integration', null, { provider: 'amazon', action: 'check' }); await W.runJobs(ctx);
+ok(j.status === 'failed' && /recusou as credenciais/.test(j.error), 'Amazon: credencial recusada é explicada');
+db.secrets.amazon_client_secret = AMZ_SECRET;
+j = job('integration', null, { provider: 'amazon', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.connected === true && j.result.account.id === 'lucas-20' && j.result.sample.length === 1 && j.result.sample[0].discount_pct === 44.45, 'Amazon: OAuth aceito e amostra (itens sem oferta são ignorados)');
+ok(amzState.searches.at(-1).mkt === 'www.amazon.com.br' && amzState.searches.at(-1).body.partnerTag === 'lucas-20' && amzState.searches.at(-1).body.minSavingPercent === 20 && amzState.searches.at(-1).body.resources.includes('offersV2.listings.price'), 'Amazon: consulta leva loja, tag, desconto mínimo e recursos de preço');
+j = job('integration', null, { provider: 'amazon', action: 'collect' }); await W.runJobs(ctx);
+ok(j.result.created === 1 && db.offers[0].affiliate_url.includes('tag=lucas-20') && db.offers[0].original_url === 'https://www.amazon.com.br/dp/B0TEST0001' && db.offers[0].previous_price === 449.9 && db.offers[0].external_id === 'B0TEST0001', 'Amazon: oferta entra com o link que já traz a tag de associado e o preço de referência da API');
+db.connectors.amazon.config.credential_version = '9.9';
+j = job('integration', null, { provider: 'amazon', action: 'check' }); await W.runJobs(ctx);
+ok(j.status === 'failed' && /Versão da credencial/.test(j.error), 'Amazon: versão de credencial inválida é explicada');
+db.connectors.amazon.config = { partner_tag: 'lucas-20' };
+j = job('integration', null, { provider: 'amazon', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === false && /Credential ID/.test(j.result.error), 'Amazon: campos faltando são listados');
+
+db.connectors.magalu = { mode: 'manual_only', config: {} };
+j = job('integration', null, { provider: 'magalu', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === false, 'Magalu: sem ID ou modelo de link pede o preenchimento');
+db.connectors.magalu.config = { affiliate_id: 'lucas' };
+j = job('integration', null, { provider: 'magalu', action: 'check' }); await W.runJobs(ctx);
+ok(j.result.ok === true && j.result.partial === true && /API pública/.test(j.result.detail), 'Magalu: avisa com franqueza que a entrada é manual');
+j = job('integration', null, { provider: 'magalu', action: 'collect' }); await W.runJobs(ctx);
+ok(j.status === 'failed', 'Magalu: coleta automática não existe');
+
+for (const s of [evoSrv, tgSrv, ml, shopee, ali, amz]) s.s.close();
 // ---- segurança do arquivo completo ----
 const E0 = { SUPABASE_URL: 'http://127.0.0.1:1', SUPABASE_SERVICE_ROLE_KEY: 'x' };
 staticStore = {};
