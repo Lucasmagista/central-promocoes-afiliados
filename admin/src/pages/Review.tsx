@@ -7,7 +7,7 @@ import { useSession } from '../session';
 import { money, ago, pct, platformName } from '../lib/format';
 import { Badge, Button, Card, Empty, ErrorBox, Kbd, Loading, PageHead, PriceTag, Seg, useAction, useDialogs, useHotkeys, useLoad } from '../ui/ui';
 import { ChannelTag, PlatformTag, PubStatus, Score } from '../ui/badges';
-import { AffiliateLinkForm, ApproveModal, PreviewPane } from '../components/Approve';
+import { AffiliateLinkForm, ApproveModal, PreviewPane, approveAllText } from '../components/Approve';
 import { OfferDrawer } from '../components/OfferDrawer';
 import { CatIcon } from '../components/CategoryPicker';
 import { DEFAULT_CATEGORIES, categorySlug } from '../lib/categories';
@@ -60,6 +60,8 @@ function Board({ onChanged }: { onChanged: () => void }) {
     if (r && await run(o.id, () => api().rejectOffer(o.id, r), 'Oferta rejeitada')) void refresh();
   };
   const approve = (o: Offer) => { if (!o.affiliate_url) { toast('Adicione o link de afiliado antes de aprovar (abra a oferta).', 'err'); return; } setApproving(o); };
+  // um clique: aprova para TODOS os grupos e canais ativos (Telegram e WhatsApp saem ao mesmo tempo)
+  const approveEverywhere = async (o: Offer) => { if (!o.affiliate_url) { toast('Adicione o link de afiliado antes de aprovar (abra a oferta).', 'err'); return; } try { const r = await api().approveOfferAll(o.id); toast(approveAllText(r), r.ignorados.length ? 'info' : 'ok'); void refresh(); } catch (e) { toast(e instanceof Error ? e.message : String(e), 'err'); } };
   const reopen = async (o: Offer) => { if (await run(o.id, () => api().reopenOffer(o.id), 'Oferta reaberta para revisão')) void refresh(); };
   const drop = (to: ColId) => {
     const o = drag; setDrag(null); setOver(null);
@@ -119,7 +121,7 @@ function Board({ onChanged }: { onChanged: () => void }) {
               <div className="row wrap small" style={{ gap: 8 }}><b>{money(o.current_price)}</b>{o.discount_pct != null && <span className="up">-{o.discount_pct}%</span>}<PlatformTag p={o.platform} /><span className="muted">{ago(o.price_observed_at)}</span></div>
               <CatSelect o={o} onChanged={() => void refresh()} disabled={!canOperate || !['needs_review', 'approved', 'scheduled', 'discovered'].includes(o.status)} />
               {c.id === 'rejected' && o.rejected_reason && <div className="small muted truncate" title={o.rejected_reason}>Motivo: {o.rejected_reason}</div>}
-              {canOperate && c.id === 'review' && <div className="row" style={{ gap: 6 }}><Button size="sm" variant="primary" icon={<CheckCircle2 size={14} />} onClick={() => approve(o)}>Aprovar</Button><Button size="sm" icon={<XCircle size={14} />} onClick={() => reject(o)}>Rejeitar</Button></div>}
+              {canOperate && c.id === 'review' && <div className="row" style={{ gap: 6 }}><Button size="sm" variant="primary" icon={<CheckCircle2 size={14} />} onClick={() => void approveEverywhere(o)} title="Envia para todos os grupos e canais ativos">Aprovar em todos</Button><Button size="sm" onClick={() => approve(o)} title="Escolher grupos">Escolher…</Button><Button size="sm" icon={<XCircle size={14} />} onClick={() => reject(o)}>Rejeitar</Button></div>}
               {canOperate && c.id === 'rejected' && <Button size="sm" icon={<RotateCcw size={14} />} onClick={() => reopen(o)}>Reabrir</Button>}
             </article>)}</div>
         </section>; })}</div>}
@@ -130,7 +132,7 @@ function Board({ onChanged }: { onChanged: () => void }) {
 
 function ListView({ onChanged }: { onChanged: () => void }) {
   const { canOperate } = useSession();
-  const { prompt } = useDialogs();
+  const { prompt, toast } = useDialogs();
   const { run, busy } = useAction();
   const q = useLoad(() => api().listOffers({ status: 'needs_review' }), [], 20000);
   const dests = useLoad(() => api().listDestinations(), []);
@@ -176,7 +178,7 @@ function ListView({ onChanged }: { onChanged: () => void }) {
             {o.validation_notes.map((n) => <div key={n} className="alert warning small">{n}</div>)}
             {!o.affiliate_url && canOperate && <AffiliateLinkForm offer={o} onDone={refresh} />}
             <div className="row wrap">
-              {canOperate && <><Button variant="primary" icon={<CheckCircle2 size={16} />} disabled={!o.affiliate_url} onClick={() => setApproving(o)}>Aprovar…</Button>
+              {canOperate && <><Button variant="primary" icon={<CheckCircle2 size={16} />} disabled={!o.affiliate_url} onClick={async () => { try { const r = await api().approveOfferAll(o.id); toast(approveAllText(r), r.ignorados.length ? 'info' : 'ok'); void refresh(); } catch (e) { toast(e instanceof Error ? e.message : String(e), 'err'); } }}>Aprovar em todos</Button><Button disabled={!o.affiliate_url} onClick={() => setApproving(o)}>Escolher grupos…</Button>
                 <Button icon={<XCircle size={16} />} busy={busy === o.id} onClick={() => reject(o)}>Rejeitar</Button></>}
               <Button variant="ghost" icon={<Eye size={16} />} onClick={() => setDetail(o.id)}>Detalhes e histórico</Button></div>
           </div>

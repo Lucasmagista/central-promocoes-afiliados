@@ -40,6 +40,7 @@ export interface Offer {
   discount_pct: number | null;
   coupon_code: string | null;
   coupon_confirmed: boolean;
+  coupon_url?: string | null;
   availability: Availability;
   price_observed_at: string;
   expires_at: string | null;
@@ -293,6 +294,7 @@ export interface CapturedLink {
   id: number; created_at: string; status: 'new' | 'ineligible' | 'offer_created' | 'duplicate' | 'filtered' | 'error' | 'ignored'; reason: string | null; platform: string | null; original_url: string;
   source_title: string | null; channel: Channel | null; product_title: string | null; offer_id: string | null; offer_status: string | null; score: number | null; image_url?: string | null;
 }
+export interface ApproveAllResult { destinos_ok: number; publicacoes_criadas: number; ignorados: { destino: string; motivo: string }[] }
 export interface RoutingRule { id: string; name: string; enabled: boolean; priority: number; platforms: string[]; categories: string[]; min_score: number; min_discount_pct: number; destinations: string[]; auto_approve: boolean }
 export type RoutingRuleInput = Omit<RoutingRule, 'id'>;
 export interface WatchItem { id: string; platform: string; external_id: string; url: string; title: string | null; target_price: number | null; min_drop_pct: number; active: boolean; last_price: number | null; last_checked_at: string | null; last_offer_at: string | null; created_at: string; image_url?: string | null }

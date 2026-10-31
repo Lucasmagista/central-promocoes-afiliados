@@ -161,6 +161,7 @@ export default function Radar() {
           <Seg value={channel} onChange={setChannel} options={[{ v: 'whatsapp', label: `WhatsApp (${cnt('whatsapp')})` }, { v: 'telegram', label: `Telegram (${cnt('telegram')})` }]} />
         </div>
         {off && <div className="alert warning" role="status"><div><b>{channel === 'whatsapp' ? 'O WhatsApp não está conectado.' : 'O Telegram não está conectado.'}</b> Sem isso o Radar não recebe as mensagens dos grupos. <Link to="/configuracoes">Abrir Configurações</Link> e use o botão “Conectar”.</div></div>}
+        {channel === 'telegram' && <div className="alert info small"><div><b>Grupo ou canal em que você não consegue colocar o bot?</b> Encaminhe as mensagens dele para o seu bot (conversa privada). Cada origem aparece aqui como “↪ nome do grupo”, e você liga o Radar nela como em qualquer outro grupo.</div></div>}
         <GroupPicker channel={channel} sources={mine} isAdmin={isAdmin} onChanged={reload} onEdit={(t, s) => setEdit({ chat: t, src: s })} />
         <LinkTester />
         <Card title="Últimos links capturados" actions={<Link to="/revisao" className="small">Abrir fila de aprovação</Link>} flush>

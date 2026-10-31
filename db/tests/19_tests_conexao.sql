@@ -31,5 +31,5 @@ begin
   perform public.watchlist_update(v_w, 12, null, false);
   assert (select last_price from public.watchlist where id = v_w) = 12, 'chamada antiga (sem imagem) continua valendo';
   perform test.as_role('authenticated', '00000000-0000-0000-0000-0000000000a1');
-  assert exists (select 1 from jsonb_array_elements(public.list_captured_links(10)) e where e ? 'image_url'), 'links capturados trazem a chave image_url' or true;
+  assert not exists (select 1 from jsonb_array_elements(public.list_captured_links(10)) e where not (e ? 'image_url')), 'links capturados trazem a chave image_url';
 end $$;

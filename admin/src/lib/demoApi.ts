@@ -564,6 +564,16 @@ export function createDemoApi(): Api {
       audit('offer_approved', 'offer', id, { destinos: dests, publicacoes_criadas: n });
       return wait(n);
     },
+    async approveOfferAll(id, when) {
+      needOp();
+      const ids = s.destinations.filter((d) => d.enabled).map((d) => d.id); if (!ids.length) ERR('Nenhum destino ativo. Cadastre e ative um grupo ou canal.');
+      let ok = 0, pubs = 0, first = ''; const ignorados: { destino: string; motivo: string }[] = [];
+      for (const did of ids) {
+        try { pubs += await this.approveOffer(id, [did], when); ok++; } catch (e) { const m = e instanceof Error ? e.message : String(e); first ||= m; ignorados.push({ destino: s.destinations.find((d) => d.id === did)?.name ?? did, motivo: m }); }
+      }
+      if (!ok) ERR(first);
+      return { destinos_ok: ok, publicacoes_criadas: pubs, ignorados };
+    },
     async rejectOffer(id, reason) {
       needOp(); if (!reason.trim()) ERR('Informe o motivo da rejeição');
       const o = s.offers.find((x) => x.id === id) ?? ERR('Oferta inexistente');

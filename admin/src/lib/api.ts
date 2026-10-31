@@ -2,7 +2,7 @@ import type {
   PromoSource, PromoSourceInput, CapturedLink, RoutingRule, RoutingRuleInput, WatchItem, CommissionSummary,
   Alert, Analytics, AuditEvent, AuditFilter, Connector, DashboardSummary, Destination, IngestInput, IngestResult,
   Offer, OfferDetail, OfferFilter, Profile, Publication, PublicationFilter, Role, Run, SettingsMap, Template,
-  Channel, ChannelOverview, SecretInfo, KeyStatus, SecretKey, IntProvider, Chat, ChatDetail, ChatFilter, ChatMessage, ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion, GroupAction, GroupDefaults, DatabaseConfig, DatabaseOverview } from './types';
+  Channel, ChannelOverview, SecretInfo, KeyStatus, SecretKey, IntProvider, Chat, ChatDetail, ChatFilter, ChatMessage, ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion, GroupAction, GroupDefaults, DatabaseConfig, DatabaseOverview, ApproveAllResult } from './types';
 
 export type SessionState =
   | { status: 'anonymous' }
@@ -26,6 +26,7 @@ export interface Api {
   ingestOffer(input: IngestInput): Promise<IngestResult>;
   setAffiliateUrl(offerId: string, url: string): Promise<void>;
   approveOffer(offerId: string, destinationIds: string[], scheduledFor?: string): Promise<number>;
+  approveOfferAll(offerId: string, scheduledFor?: string): Promise<ApproveAllResult>;
   rejectOffer(offerId: string, reason: string): Promise<void>;
   previewText(offerId: string, destinationId: string): Promise<string>;
   listCategories(): Promise<ProductCategory[]>;

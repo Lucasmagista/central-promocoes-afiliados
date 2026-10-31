@@ -32,7 +32,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 export interface RenderContext {
   offer: Pick<Offer, 'title' | 'current_price' | 'previous_price' | 'previous_price_source' | 'discount_pct'
-    | 'coupon_code' | 'coupon_confirmed' | 'price_observed_at' | 'category' | 'seller_name' | 'affiliate_url'>;
+    | 'coupon_code' | 'coupon_confirmed' | 'coupon_url' | 'price_observed_at' | 'category' | 'seller_name' | 'affiliate_url'>;
   disclosure: string;
   shortlinkBase: string;
   code?: string;
@@ -42,6 +42,9 @@ export interface RenderContext {
 
 /** Réplica fiel da regra do banco: linha com variável vazia é descartada; aviso de afiliado é sempre garantido. */
 const spin = (t: string) => t.replace(/\[\[([^\[\]]+)\]\]/g, (_m, g: string) => { const o = g.split("|"); return o[Math.floor(Math.random() * o.length)]; });
+// links de afiliado que já são curtos (ML, Shopee…) vão diretos, sem passar pelo redirecionador
+export const isShortAffiliate = (u?: string | null) => /^https?:\/\/(meli\.la|s\.shopee\.com\.br|shope\.ee|amzn\.to|a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(u ?? '');
+
 export function renderTemplate(body: string, channel: Channel, ctx: RenderContext): string {
   const o = ctx.offer;
   const discount = o.discount_pct != null ? String(+o.discount_pct) : '';
@@ -51,13 +54,15 @@ export function renderTemplate(body: string, channel: Channel, ctx: RenderContex
       ? `Já registramos por ${money(o.previous_price)}`
       : `Antes: ${money(o.previous_price)}`) + ` (-${discount}%)`;
   }
-  const url = ctx.shortlinkBase ? `${ctx.shortlinkBase.replace(/\/+$/, '')}/${ctx.code ?? 'abc123xy'}` : o.affiliate_url ?? '';
+  const url = ctx.shortlinkBase && !isShortAffiliate(o.affiliate_url) ? `${ctx.shortlinkBase.replace(/\/+$/, '')}/${ctx.code ?? 'abc123xy'}` : o.affiliate_url ?? '';
   const observed = new Date(o.price_observed_at).toLocaleString('pt-BR', {
     timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
   }).replace(',', ' às');
   const vars: Record<string, string> = {
     title: shortTitle(o.title), full_title: o.title, ai_text: ctx.aiText ?? '', price: money(o.current_price), previous_line: previousLine,
-    coupon_line: o.coupon_code && o.coupon_confirmed ? `Cupom: ${o.coupon_code}` : '',
+    coupon_line: o.coupon_code && o.coupon_confirmed
+      ? `🎟️ Cupom: ${o.coupon_code}${o.coupon_url ? `\n👉 Resgate o cupom aqui: ${o.coupon_url}` : ''}`
+      : o.coupon_url ? `🎟️ Resgate o cupom aqui: ${o.coupon_url}` : '',
     observed_at: observed, url, disclosure: ctx.disclosure, category: o.category ?? '', seller: o.seller_name ?? '',
   };
   const escape = channel === 'telegram';

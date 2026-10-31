@@ -2,7 +2,7 @@ import { categorySlug } from '../lib/categories';
 import { useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api';
-import type { Destination, Offer } from '../lib/types';
+import type { ApproveAllResult, Destination, Offer } from '../lib/types';
 import { previewHtml } from '../lib/template';
 import { Button, Field, Modal, useAction, useLoad } from '../ui/ui';
 import { ChannelTag } from '../ui/badges';
@@ -22,6 +22,11 @@ export function PreviewPane({ offer, destinations }: { offer: Offer; destination
   </div>;
 }
 
+export function approveAllText(r: ApproveAllResult) {
+  const n = r.ignorados.length;
+  return `Aprovada para ${r.destinos_ok} grupo(s)/canal(is)` + (n ? ` · ${n} ignorado(s): ${r.ignorados.slice(0, 2).map((x) => `${x.destino} (${x.motivo})`).join('; ')}${n > 2 ? '…' : ''}` : '');
+}
+
 export function eligible(offer: Offer, d: Destination) {
   const sl = categorySlug(offer.category);
   return d.enabled && (!d.categories.length || (!!sl && d.categories.includes(sl)));
@@ -38,12 +43,15 @@ export function ApproveModal({ offer, onClose, onDone }: { offer: Offer; onClose
   const channels = (['telegram', 'whatsapp'] as const).map((ch) => { const all = list.filter((d) => d.channel === ch && eligible(offer, d)); return { ch, all, on: all.filter((d) => sel.includes(d.id)).length }; }).filter((x) => x.all.length > 0);
   const toggleChannel = (ch: 'telegram' | 'whatsapp', on: boolean) => { const ids = list.filter((d) => d.channel === ch && eligible(offer, d)).map((d) => d.id); setSel(on ? Array.from(new Set([...sel, ...ids])) : sel.filter((x) => !ids.includes(x))); };
   const noLink = !offer.affiliate_url;
+  const everywhere = async () => { if (await run('all', async () => { const r = await api().approveOfferAll(offer.id, when ? new Date(when).toISOString() : undefined); return r; }, 'Oferta aprovada e enfileirada em todos os grupos')) { onDone(); onClose(); } };
+  const nAll = list.filter((d) => d.enabled).length;
   return (
     <Modal wide title="Aprovar oferta" onClose={onClose}
       footer={<><Button onClick={onClose}>Cancelar</Button>
-        <Button variant="primary" icon={<CheckCircle2 size={16} />} busy={busy === 'ok'} disabled={!sel.length || noLink}
+        <Button variant="primary" icon={<CheckCircle2 size={16} />} busy={busy === 'all'} disabled={!nAll || noLink} onClick={() => void everywhere()}>Enviar para todos ({nAll})</Button>
+        <Button icon={<CheckCircle2 size={16} />} busy={busy === 'ok'} disabled={!sel.length || noLink}
           onClick={async () => { if (await run('ok', () => api().approveOffer(offer.id, sel, when ? new Date(when).toISOString() : undefined), 'Oferta aprovada e enfileirada')) { onDone(); onClose(); } }}>
-          Aprovar para {sel.length} destino(s)</Button></>}>
+          Só os {sel.length} marcado(s)</Button></>}>
       <div className="col">
         <div><b>{offer.title}</b></div>
         {noLink && <div className="alert warning"><AlertTriangle size={16} style={{ flex: 'none', marginTop: 2 }} />Esta oferta não tem link de afiliado. Informe o link antes de aprovar.</div>}

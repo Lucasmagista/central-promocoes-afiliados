@@ -998,6 +998,14 @@ export function mapTelegramUpdate(u) {
   const c = m.chat; const text = m.text || m.caption || ''; const kind = m.photo ? 'image' : m.video ? 'video' : m.voice || m.audio ? 'audio' : m.document ? 'document' : m.sticker ? 'sticker' : 'text';
   if (!text && kind === 'text') return null;
   const from = m.from || m.sender_chat || {};
+  const fo = m.forward_origin || null; const oc = (fo && (fo.chat || fo.sender_chat)) || m.forward_from_chat || null;
+  if (c.type === 'private' && (fo || oc || m.forward_from || m.forward_sender_name)) {
+    const who = oc ? oc.title : (m.forward_sender_name || (fo && fo.sender_user_name) || 'pessoas');
+    const key = oc ? String(oc.id) : 'pessoas';
+    return { chat: { channel: 'telegram', external_id: 'fwd:' + key, kind: oc && oc.type === 'channel' ? 'channel' : 'group', title: ('↪ ' + (oc ? who : 'Encaminhadas de ' + who)).slice(0, 190), username: oc && oc.username || undefined, metadata: { forwarded: true } },
+      direction: 'in', external_id: 'fwd:' + key + ':' + c.id + ':' + m.message_id, sender_external_id: from.id != null ? String(from.id) : undefined, sender_name: from.first_name || from.title || undefined,
+      body: tgBody(m, text) || '[' + kind + ']', kind, sent_at: m.date ? new Date(m.date * 1000).toISOString() : undefined };
+  }
   return { chat: { channel: 'telegram', external_id: String(c.id), kind: c.type === 'channel' ? 'channel' : c.type === 'private' ? 'private' : 'group', title: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') || undefined, username: c.username || undefined },
     direction: 'in', external_id: `${c.id}:${m.message_id}`, sender_external_id: from.id != null ? String(from.id) : undefined, sender_name: from.title || [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username,
     body: tgBody(m, text) || `[${kind}]`, kind, sent_at: m.date ? new Date(m.date * 1000).toISOString() : undefined };
@@ -1155,7 +1163,7 @@ async function personalizeLink(ctx, rt, pc) {
 }
 
 /* ================================================================== Radar de grupos */
-const FOLLOW_HOST = /(^|\.)(shopee\.com\.br|shopee\.com|shp\.ee|shope\.ee|mercadolivre\.com\.br|mercadolibre\.com|mercadolivre\.com|meli\.la|amazon\.com\.br|amazon\.com|amzn\.to|amzn\.com|a\.co|aliexpress\.com|aliexpress\.us|magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br|bit\.ly|tinyurl\.com|cutt\.ly|t\.ly|is\.gd|ow\.ly|rebrand\.ly|encurtador\.com\.br|tiny\.cc)$/i;
+const FOLLOW_HOST = /(^|\.)(shopee\.com\.br|shopee\.com|shp\.ee|shope\.ee|mercadolivre\.com\.br|mercadolibre\.com|mercadolivre\.com|meli\.la|amazon\.com\.br|amazon\.com|amzn\.to|amzn\.com|a\.co|divulgador\.link|link\.amazon|amzlinks\.in|aliexpress\.com|aliexpress\.us|magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br|bit\.ly|tinyurl\.com|cutt\.ly|t\.ly|is\.gd|ow\.ly|rebrand\.ly|encurtador\.com\.br|tiny\.cc)$/i;
 export function extractUrls(text) {
   const out = []; const re = /https?:\/\/[^\s<>"'`)\]]+/gi; let m;
   while ((m = re.exec(String(text || '')))) { const u = m[0].replace(/[.,;:!?*_~]+$/, ''); if (u.length > 12 && u.length < 600 && !out.includes(u)) out.push(u); }
@@ -1172,9 +1180,111 @@ export function identifyProduct(url) {
   return null;
 }
 export function parsePrices(text) {
-  const vals = []; const re = /R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{1,2})?|[0-9]+(?:,[0-9]{1,2})?)/g; let m;
-  while ((m = re.exec(String(text || '')))) { const v = Number(m[1].replace(/\./g, '').replace(',', '.')); if (v > 0 && v < 1e7) vals.push(v); }
+  const t = String(text || '').replace(/\d+\s*x\s*(?:de\s*)?(?:R\$\s*)?[0-9][0-9.,]*/gi, ' ');
+  const vals = []; let m; const re = /R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{1,2})?|[0-9]+(?:,[0-9]{1,2})?)/g;
+  while ((m = re.exec(t))) { const v = Number(m[1].replace(/\./g, '').replace(',', '.')); if (v > 0 && v < 1e7) vals.push(v); }
+  if (!vals.length) {
+    const re2 = /\b(?:por|de|apenas|só|a partir de)\s+([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+,[0-9]{2})\b/gi;
+    while ((m = re2.exec(t))) { const v = Number(m[1].replace(/\./g, '').replace(',', '.')); if (v > 0 && v < 1e7) vals.push(v); }
+  }
   return vals.length ? { price: Math.min(...vals), previous: vals.length > 1 ? Math.max(...vals) : null } : {};
+}
+
+const STOP_COUPON = new Set(['OFF', 'PIX', 'APP', 'DESCONTO', 'ANUNCIO', 'FRETE', 'CUPOM', 'LINK', 'AQUI', 'NOVO', 'USE', 'CODIGO']);
+// Cupom escrito na mensagem do grupo: o código (ex.: "Cupom: XPTO15") e o link de resgate (linha "resgate o cupom aqui" + link).
+export function parseCoupon(text) {
+  const lines = String(text || '').split(/\r?\n/); let code = null; let url = null;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!code) {
+      const re = /(?:cupom|cupon|dupom|c[óo]digo)[^A-Za-z0-9\n]{0,4}(?:de desconto)?[^A-Za-z0-9\n]{0,6}([A-Za-z0-9]{4,20})(?![A-Za-z0-9])/gi; let m;
+      while ((m = re.exec(l))) { const c = m[1]; if (c === c.toUpperCase() && /[A-Z]/.test(c) && !STOP_COUPON.has(c)) { code = c; break; } }
+    }
+    if (!url && /resgat|pegue o cupom|ative o cupom|cupom aqui/i.test(l)) { const u = extractUrls(l)[0] || extractUrls(lines[i + 1] || '')[0]; if (u) url = u; }
+  }
+  return { code, url };
+}
+// Só vale link de cupom da própria loja e SEM rastreio de afiliado de terceiros (não entregamos comissão a outra pessoa).
+export function couponUrlOk(u) {
+  let x; try { x = parseUrl(u); } catch { return false; }
+  if (x.protocol !== 'https:') return false;
+  if (!/(^|\.)(shopee\.com\.br|mercadolivre\.com\.br|amazon\.com\.br|aliexpress\.com)$/i.test(x.hostname)) return false;
+  if (/(^|\.)(s\.shopee\.com\.br|shope\.ee|shp\.ee|meli\.la)$/i.test(x.hostname)) return false;
+  return !/[?&](af_[a-z_]+|aff[a-z_]*|matt_[a-z]+|tag|smtt|utm_[a-z]+|ref)=/i.test(String(u));
+}
+// Nome do produto a partir do texto: a 1ª linha costuma ser a chamada ("PRA QUE SERVE?"), a seguinte é o produto.
+export function guessTitle(text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.replace(/[*_~\u0060]/g, '').trim()).filter(Boolean);
+  const cand = lines.filter((l) => !/https?:\/\//i.test(l) && !/R\$|cupom|dupom|resgat|frete|vendido por|loja oficial|à vista|em \d+x|sem juros|\bpix\b|\bpor [0-9]/i.test(l) && l.length >= 12 && l.length <= 200 && /\s/.test(l) && !/^@/.test(l));
+  if (!cand.length) return '';
+  return (cand.length > 1 ? cand[1] : cand[0]).replace(/^[^\p{L}\p{N}]+/u, '').trim();
+}
+// Link curto do Mercado Livre (meli.la) de afiliado: abre a página "social" do afiliado, que traz o produto em destaque
+// (id, endereço, título e imagem) no HTML. Devolve o produto para a gente montar o SEU link.
+export function mlSocialProduct(html) {
+  const t = String(html || '');
+  const m = /"metadata":\{"id":"(MLB\d+)","product_id":"(MLB\d+)"[\s\S]{0,600}?"url":"(www\.mercadolivre\.com\.br[^"]+)"/.exec(t);
+  if (!m) return null;
+  const url = 'https://' + m[3].replace(/\\u002F/gi, '/').split(/[?#]/)[0];
+  const ti = /<meta name="title" content="([^"]*)"/i.exec(t); const im = /<meta property="og:image" content="(https:[^"]*)"/i.exec(t);
+  return { item: m[1], product: m[2], url, title: ti ? decodeHtml(ti[1]).replace(/\s*\|\s*Mercado Livre.*$/i, '').trim() : '', image: im ? decodeHtml(im[1]) : '' };
+}
+// Segue só os redirecionamentos (sem ler a página) e devolve o último endereço. Usado para achar a página do cupom da Shopee.
+async function finalRedirect(ctx, url) {
+  let cur = url;
+  for (let i = 0; i < 4; i++) {
+    let host = ''; try { host = parseUrl(cur).hostname; } catch { return cur; }
+    if (!(ctx.followHost || FOLLOW_HOST).test(host)) return cur;
+    let r; try { r = await ctx.http({ method: 'GET', url: cur, redirect: 'manual', timeoutMs: 8000, headers: { 'user-agent': 'Mozilla/5.0 (compatible; CentralPromocoes/1.0)', accept: 'text/html' } }); } catch { return cur; }
+    const loc = r.location || (r.headers && r.headers.location);
+    if (r.status >= 300 && r.status < 400 && loc) { cur = absUrl(String(loc), cur); continue; }
+    return cur;
+  }
+  return cur;
+}
+// Link de cupom utilizável: da própria loja e sem rastreio de terceiros. Link curto de afiliado da Shopee que termina numa página
+// de cupom (/m/...) vira o endereço limpo da página, sem os parâmetros de quem divulgou.
+async function couponLink(ctx, url) {
+  if (couponUrlOk(url)) return url;
+  if (!/(^|\.)(s\.shopee\.com\.br|shope\.ee|shp\.ee)$/i.test((() => { try { return parseUrl(url).hostname; } catch { return ''; } })())) return null;
+  const fin = await finalRedirect(ctx, url);
+  try { const x = parseUrl(fin); if (/(^|\.)shopee\.com\.br$/i.test(x.hostname) && /^\/m\/[A-Za-z0-9_-]+/.test(x.pathname)) return 'https://shopee.com.br' + x.pathname; } catch { /* segue */ }
+  return null;
+}
+const decodeHtml = (s) => String(s || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+// Nome e imagem da página pública do produto (só para URLs que NÓS montamos a partir do código do produto).
+async function pageMeta(ctx, url) {
+  try {
+    const r = await ctx.http({ method: 'GET', url, redirect: 'follow', timeoutMs: 9000, headers: { 'user-agent': 'Mozilla/5.0 (compatible; CentralPromocoes/1.0)', accept: 'text/html', 'accept-language': 'pt-BR,pt;q=0.9' } });
+    const t = typeof r.data === 'string' ? r.data.slice(0, 150000) : ''; if (!t) return {};
+    const og = (p) => { const m = new RegExp('<meta[^>]+(?:property|name)=["\']' + p + '["\'][^>]*content=["\']([^"\']*)', 'i').exec(t) || new RegExp('<meta[^>]+content=["\']([^"\']*)["\'][^>]*(?:property|name)=["\']' + p + '["\']', 'i').exec(t); return m ? decodeHtml(m[1]).trim() : ''; };
+    let title = og('og:title') || og('title'); if (!title) { const m = /<title[^>]*>([^<]{3,300})<\/title>/i.exec(t); title = m ? decodeHtml(m[1]).trim() : ''; }
+    title = title.replace(/^Amazon\.com\.br\s*:\s*/i, '').replace(/\s*[|–-]\s*(Amazon\.com\.br|Mercado Livre).*$/i, '').trim();
+    const img = og('og:image') || (/"hiRes":"(https:[^"]+)"/.exec(t) || [])[1] || (/id="landingImage"[^>]+data-old-hires="([^"]+)"/.exec(t) || [])[1] || '';
+    return { title, image: /^https:\/\//.test(img) ? img : '' };
+  } catch { return {}; }
+}
+// Modo sem API (conector em "cadastro manual"): monta a oferta com o texto do grupo e o SEU código de afiliado.
+// Amazon: tag própria no link /dp/ASIN. Mercado Livre: modelo de link do conector. Shopee: só com a API (não dá para fabricar o link).
+async function textModeItem(ctx, rl, msg, tp, cfg) {
+  if (!tp.price) return { error: 'A mensagem não traz o preço (o modo sem API precisa dele)' };
+  let url; let aff;
+  if (rl.platform === 'amazon') {
+    if (!cfg.partner_tag) return { error: 'Amazon: informe o seu código de afiliado (tag) em Conectores → Amazon' };
+    url = 'https://www.amazon.com.br/dp/' + rl.external_id; aff = url + '?tag=' + encodeURIComponent(cfg.partner_tag);
+  } else if (rl.platform === 'mercadolivre') {
+    if (!cfg.link_template) return { error: 'Mercado Livre: informe o modelo do seu link (com o seu matt_tool) em Conectores → Mercado Livre' };
+    url = /^https:\/\/www\.mercadolivre\.com\.br\/[^?#]*\/p\/MLB\d+$/.test(String(rl.final_url || '')) ? rl.final_url : 'https://produto.mercadolivre.com.br/MLB-' + String(rl.external_id).replace(/^MLB/i, ''); aff = affiliateUrl({ url }, cfg);
+  } else if (rl.platform === 'shopee') {
+    if (!cfg.link_template) return { error: 'Shopee: informe o modelo do seu link de afiliado em Conectores → Shopee (ou ative a API)' };
+    const [shop, item] = String(rl.external_id).split('.'); if (!shop || !item) return { error: 'Produto da Shopee não identificado' };
+    url = 'https://shopee.com.br/product/' + shop + '/' + item; aff = affiliateUrl({ url }, cfg);
+  } else return { error: 'Sem API: não dá para gerar o seu link de afiliado da ' + (STORE_LABEL[rl.platform] || rl.platform) + ' (ative a API ou use a extensão)' };
+  if (!aff) return { error: 'Sem link de afiliado: configure o conector' };
+  const meta = rl.platform === 'amazon' ? await pageMeta(ctx, url) : { title: rl.title, image: rl.image };
+  const title = String(meta.title || guessTitle(msg.body)).slice(0, 300);
+  if (!title) return { error: 'Não deu para descobrir o nome do produto na mensagem' };
+  return { item: { external_id: rl.external_id, url, affiliate_url: aff, title, price: tp.price, previous: tp.previous, image: meta.image || undefined } };
 }
 const absUrl = (loc, base) => { try { if (/^https?:\/\//i.test(loc)) return loc; const b = parseUrl(base); return b.protocol + '//' + b.host + (loc.startsWith('/') ? loc : '/' + loc); } catch { return ''; } };
 
@@ -1183,13 +1293,18 @@ export async function resolveLink(ctx, url) {
   const key = await (ctx.sha256hex || sha256Hex)(url);
   const cached = await ctx.rpc('link_cache_get', { p_hash: key }).catch(() => null);
   if (cached && (cached.platform || cached.final_url)) return cached;
-  let cur = url; let found = identifyProduct(cur);
+  let cur = url; let found = identifyProduct(cur); let meta = {};
   for (let hop = 0; hop < 5 && !found; hop++) {
     let host = ''; try { host = parseUrl(cur).hostname; } catch { break; }
     if (!(ctx.followHost || FOLLOW_HOST).test(host)) break;
     let r; try { r = await ctx.http({ method: 'GET', url: cur, redirect: 'manual', timeoutMs: 8000, headers: { 'user-agent': 'Mozilla/5.0 (compatible; CentralPromocoes/1.0)', accept: 'text/html' } }); } catch { break; }
     const loc = r.location || (r.headers && r.headers.location);
     if (r.status >= 300 && r.status < 400 && loc) { cur = absUrl(String(loc), cur); found = identifyProduct(cur); continue; }
+    if (typeof r.data === 'string' && /mercadolivre\.com\.br\/social\//i.test(cur)) {
+      const ml = mlSocialProduct(r.data.slice(0, 400000));
+      if (ml) { cur = ml.url; found = identifyProduct(cur); meta = { title: ml.title, image: ml.image }; }
+      break;
+    }
     if (typeof r.data === 'string') { // alguns encurtadores devolvem uma página com o destino no HTML
       for (const cand of extractUrls(r.data.slice(0, 60000)).slice(0, 40)) { const f = identifyProduct(cand); if (f) { cur = cand; found = f; break; } }
     }
@@ -1197,25 +1312,32 @@ export async function resolveLink(ctx, url) {
   }
   const out = { final_url: cur, platform: found ? found.platform : null, external_id: found ? found.external_id : null };
   await ctx.rpc('link_cache_put', { p_hash: key, p_final: cur, p_platform: out.platform, p_external: out.external_id }).catch(() => {});
-  return out;
+  return { ...out, ...meta };
 }
 
 export async function processRadarMessage(ctx, rt, msg, state) {
   const src = msg.source || {}; const platforms = Array.isArray(src.platforms) ? src.platforms : []; const blocked = Array.isArray(src.blocked_words) ? src.blocked_words : [];
-  const tp = parsePrices(msg.body); const results = [];
-  for (const url of extractUrls(msg.body).slice(0, 3)) {
+  const tp = parsePrices(msg.body); const cp = parseCoupon(msg.body); const results = [];
+  for (const url of extractUrls(msg.body).filter((u) => u !== cp.url).slice(0, 3)) {
     const rec = (status, reason, extra = {}) => ctx.rpc('record_captured_link', { p: { source_id: src.id, chat_message_id: msg.id, original_url: url, status, reason, ...extra } }).catch(() => {});
     try {
       const rl = await resolveLink(ctx, url);
       const base = { final_url: rl.final_url, platform: rl.platform, external_id: rl.external_id };
-      if (!rl.platform) { await rec('ignored', 'Link que não é de uma loja suportada', base); results.push('ignored'); continue; }
+      if (!rl.platform) { await rec('ignored', /mercadolivre\.com\.br\/social\//i.test(String(rl.final_url || '')) ? 'Link de lista de afiliado do Mercado Livre: não diz qual é o produto (use o link do produto)' : 'Link que não é de uma loja suportada', base); results.push('ignored'); continue; }
       if (platforms.length && !platforms.includes(rl.platform)) { await rec('filtered', 'Loja fora das aceitas por esta fonte', base); results.push('filtered'); continue; }
       const conn = connectorOf(rt, rl.platform); const cfg = conn.config || {};
       if (['disabled', 'paused_policy', 'error'].includes(conn.mode)) { await rec('ineligible', `Conector ${STORE_LABEL[rl.platform] || rl.platform} desligado`, base); results.push('ineligible'); continue; }
-      const cur = await fetchCurrent(ctx, rt, rl.platform, rl.external_id);
-      if (cur.supported === false) { await rec('ineligible', cur.reason, base); results.push('ineligible'); continue; }
-      if (!cur.found) { await rec('ineligible', 'Produto não encontrado no seu programa de afiliados (não dá para gerar o seu link)', base); results.push('ineligible'); continue; }
-      const it = cur.item;
+      let it; const textMode = conn.mode === 'manual_only' && ['amazon', 'mercadolivre', 'shopee'].includes(rl.platform);
+      if (textMode) {
+        const t = await textModeItem(ctx, rl, msg, tp, cfg);
+        if (t.error) { await rec('ineligible', t.error, base); results.push('ineligible'); continue; }
+        it = t.item;
+      } else {
+        const cur = await fetchCurrent(ctx, rt, rl.platform, rl.external_id);
+        if (cur.supported === false) { await rec('ineligible', cur.reason, base); results.push('ineligible'); continue; }
+        if (!cur.found) { await rec('ineligible', 'Produto não encontrado no seu programa de afiliados (não dá para gerar o seu link)', base); results.push('ineligible'); continue; }
+        it = cur.item;
+      }
       if (!affiliateUrl(it, cfg)) { await rec('ineligible', 'Sem link de afiliado: configure o modelo do link no conector', base); results.push('ineligible'); continue; }
       const low = it.title.toLowerCase();
       const hit = blocked.find((w) => w && low.includes(String(w).toLowerCase()));
@@ -1228,9 +1350,11 @@ export async function processRadarMessage(ctx, rt, msg, state) {
       if (tp.price && it.price > tp.price * 1.2) { await rec('filtered', `Preço atual (R$ ${it.price}) acima do anunciado (R$ ${tp.price}): promoção encerrada?`, base); results.push('filtered'); continue; }
       const done = (state.created[src.id] || 0) + Number(src.created_last_hour || 0);
       if (done >= Number(src.max_per_hour || 20)) { await rec('filtered', 'Limite por hora da fonte atingido', base); results.push('filtered'); continue; }
-      const res = await ingestStoreItem(ctx, rt, rl.platform, cfg, it, { layer: 'C', sourceName: `Radar: ${msg.chat_title || 'grupo'}`.slice(0, 80), autoOk: src.mode === 'auto',
-        evidence: { fonte: msg.chat_title, canal: msg.channel, preco_no_texto: tp.price ?? undefined } });
+      const res = await ingestStoreItem(ctx, rt, rl.platform, cfg, it, { layer: 'C', sourceName: `Radar: ${msg.chat_title || 'grupo'}`.slice(0, 80), autoOk: src.mode === 'auto' && !textMode, kind: textMode ? 'admin_declared' : 'api',
+        evidence: { fonte: msg.chat_title, canal: msg.channel, preco_no_texto: tp.price ?? undefined, modo: textMode ? 'texto do grupo (sem API): confira o preço' : undefined } });
       if (res.status === 'created') {
+        const cu = cp.url ? await couponLink(ctx, cp.url).catch(() => null) : null;
+        if (cp.code || cu) await ctx.rpc('set_offer_coupon', { p_offer: res.offer_id, p_code: cp.code || null, p_url: cu }).catch(() => {});
         state.created[src.id] = (state.created[src.id] || 0) + 1;
         await ctx.rpc('register_offer_source', { p_offer: res.offer_id, p_source: src.id }).catch(() => {});
         await rec('offer_created', `Score ${res.score ?? '—'}`, { ...base, offer_id: res.offer_id }); results.push('created');

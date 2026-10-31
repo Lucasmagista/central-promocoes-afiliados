@@ -89,7 +89,9 @@ begin
   perform test.as_role('service_role');
   update public.offers set status = 'needs_review', rejected_reason = null, score = 80, is_simulated = false where id = v_off;
   assert (public.auto_route_offer(v_off) ->> 'auto')::boolean, 'regra manda aprovar sozinha';
+  perform public.set_setting('route_all_destinations', 'false'::jsonb);
   assert public.auto_route_offer(v_off) -> 'destinations' = jsonb_build_array(v_dest), 'destino vem da regra';
+  perform public.set_setting('route_all_destinations', 'true'::jsonb);
   perform public.set_setting('mode', '"simulation"'::jsonb);
   assert (public.run_auto_approve(5) ->> 'approved') = '0', 'em simulação não aprova';
   perform public.set_setting('mode', '"review"'::jsonb);

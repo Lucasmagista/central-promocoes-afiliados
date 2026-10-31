@@ -38,6 +38,7 @@ const PLATFORMS: Record<string, PlatformDef> = {
     steps: ['No painel do Programa de Afiliados da Shopee, abra a área de Open API.', 'Copie o App ID e o Secret.', 'Cole aqui, clique em “Salvar e testar” e confira a amostra de produtos.'],
     pulls: ['Produtos com preço, desconto e % de comissão', 'Link de afiliado já rastreado (offerLink)', 'Comissão e conversões dos últimos 30 dias'],
     docs: [{ label: 'Afiliados Shopee', url: 'https://affiliate.shopee.com.br' }],
+    linkTemplateEx: '{url}?utm_source=an_SEU_ID&mmp_pid=an_SEU_ID&utm_medium=affiliates',
     aff: { label: 'ID de afiliado', key: 'affiliate_id', hint: 'O ID do programa de afiliados da Shopee (só referência).', ph: 'seu-id' },
   },
   amazon: {

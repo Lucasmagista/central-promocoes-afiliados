@@ -5,7 +5,7 @@ import type {
   PriceObservation, Profile, Publication, Role, Run, SettingsMap, Template,
   SecretInfo, KeyStatus, Channel, ChannelOverview, Chat, ChatDetail, ChatFilter, ChatMessage, OutboxItem, Participant,
   ProductCategory, DiscoveredGroup, Contact, ChannelJob, TemplateVersion,
-  PromoSource, CapturedLink, RoutingRule, WatchItem, CommissionSummary,
+  PromoSource, CapturedLink, RoutingRule, WatchItem, CommissionSummary, ApproveAllResult,
 } from './types';
 
 type Row = Record<string, any>;
@@ -104,6 +104,9 @@ export function createSupabaseApi(url: string, anonKey: string): Api {
     async setAffiliateUrl(offerId, url) { await rpc('set_offer_affiliate_url', { p_offer: offerId, p_url: url }); },
     async approveOffer(offerId, destinationIds, scheduledFor) {
       return rpc<number>('approve_offer', { p_offer: offerId, p_destinations: destinationIds, p_scheduled_for: scheduledFor ?? null });
+    },
+    async approveOfferAll(offerId, scheduledFor) {
+      return rpc<ApproveAllResult>('approve_offer_all', { p_offer: offerId, p_scheduled_for: scheduledFor ?? null, p_destinations: null });
     },
     async listCategories() {
       const { data, error } = await sb.from('product_categories').select('*').order('sort');

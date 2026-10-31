@@ -234,6 +234,7 @@ const rpc = async (name, args) => {
     case 'set_offer_signals': db.signals.push(args); return null;
     case 'category_guess': return 'eletronicos';
     case 'claim_radar_messages': { const q = db.radarQueue; db.radarQueue = []; return q; }
+    case 'set_offer_coupon': (db.coupons ||= []).push(args); return null;
     case 'record_captured_link': db.captured.push(args.p); return db.captured.length;
     case 'register_offer_source': db.sources.push(args); return 1;
     case 'link_cache_get': return db.linkCache[args.p_hash] || null;
@@ -690,6 +691,53 @@ o = await runMsg(mkMsg(shortSrv.url + '/s1', { min_discount_pct: 70 })); ok(o.r[
 o = await runMsg(mkMsg(shortSrv.url + '/s5')); ok(o.r[0] === 'ineligible' && /programa de afiliados/.test(db.captured[0].reason), 'radar: produto que não está no seu programa é descartado (nunca usa o link de terceiros)');
 o = await runMsg(mkMsg(shortSrv.url + '/s4')); ok(o.r[0] === 'ineligible' && /Magalu/.test(db.captured[0].reason), 'radar: Magalu (sem API) é descartada com motivo claro');
 o = await runMsg(mkMsg(shortSrv.url + '/s3')); ok(o.r[0] === 'ignored', 'radar: link que não é de loja é ignorado');
+// ---- Radar sem API (modo texto), cupom e Telegram encaminhado
+ok(W.parsePrices('em 5x de R$ 34,20 sem juros, por R$ 171,00').price === 171, 'radar: parcela não vira preço');
+ok(W.parsePrices('Whey 1kg\n\npor 171,00 em 5x sem juros').price === 171, 'radar: lê "por 171,00" sem R$');
+{ const c = W.parseCoupon('COOKTOP\n🎫 Use o cupom R$80 OFF | resgate o cupom aqui:\nhttps://shopee.com.br/m/cupom\n🛒 Compre aqui:\nhttps://s.shopee.com.br/AAA'); ok(c.url === 'https://shopee.com.br/m/cupom' && c.code === null, 'cupom: acha o link de resgate na linha seguinte (sem código)'); }
+{ const c = W.parseCoupon('Perfume\n・Cupom Exclusivo Meli+\nUse o Cupom: SITEMELIMAIS15 \nhttps://meli.la/1'); ok(c.code === 'SITEMELIMAIS15' && !c.url, 'cupom: lê o código e ignora palavras comuns'); }
+ok(W.parseCoupon('Aplique o Cupom de 20% OFF no Anúncio').code === null, 'cupom: "cupom de 20% OFF" não é código');
+ok(W.couponUrlOk('https://shopee.com.br/m/cupom') && !W.couponUrlOk('https://s.shopee.com.br/abc') && !W.couponUrlOk('https://shopee.com.br/x?af_siteid=9') && !W.couponUrlOk('https://promo.xetlinks.com/7X'), 'cupom: só link da loja e sem afiliado de terceiros');
+ok(W.guessTitle('PRA QUE SERVE? NÃO SEI, mas tá barato 👍\n\nÁgua Micelar Demaquilante 7 em 1 Neutrogena 200ml\n\nDe R$ 52 por R$ 32\nhttps://link.amazon/B0e9tDfQ8') === 'Água Micelar Demaquilante 7 em 1 Neutrogena 200ml', 'radar: acha o nome do produto na mensagem');
+{ const m = W.mapTelegramUpdate({ update_id: 1, message: { message_id: 7, date: 1700000000, chat: { id: 55, type: 'private', first_name: 'Lucas' }, from: { id: 55, first_name: 'Lucas' }, forward_origin: { type: 'channel', chat: { id: -100123, type: 'channel', title: 'Canal Alheio' }, message_id: 3 }, text: 'Oferta https://amzn.to/x' } });
+  ok(m && m.chat.external_id === 'fwd:-100123' && m.chat.kind === 'channel' && /Canal Alheio/.test(m.chat.title) && m.chat.metadata.forwarded === true && m.direction === 'in', 'telegram: mensagem encaminhada vira fonte com o nome do canal de origem'); }
+ok(W.mapTelegramUpdate({ update_id: 2, message: { message_id: 8, date: 1700000000, chat: { id: 55, type: 'private', first_name: 'Lucas' }, from: { id: 55 }, text: 'oi' } }).chat.external_id === '55', 'telegram: conversa privada comum continua igual');
+{ // Amazon sem API: conector em cadastro manual + tag própria
+  db.connectors.amazon = { mode: 'manual_only', config: { partner_tag: 'meu-20' } };
+  const realHttp = ctx.http; ctx.http = async (o) => String(o.url).includes('amazon.com.br/dp/') ? { status: 200, data: '<html><meta property="og:title" content="Amazon.com.br: Água Micelar Neutrogena 200ml"><meta property="og:image" content="https://m.media-amazon.com/img.jpg"></html>' } : realHttp(o);
+  const amzMsg = (extra = '') => mkMsg('PRA QUE SERVE?\nÁgua Micelar Neutrogena 200ml\nDe R$ 52 por R$ 32\n' + extra + 'https://www.amazon.com.br/dp/B08FDS9JT9?tag=outro-20', {});
+  let oo = await runMsg(amzMsg('Use o cupom: PROMO10\n'));
+  ok(oo.r[0] === 'created' && db.offers[0].affiliate_url === 'https://www.amazon.com.br/dp/B08FDS9JT9?tag=meu-20', 'radar sem API: usa a SUA tag da Amazon, nunca a do grupo');
+  ok(db.offers[0].source_kind === 'admin_declared' && db.offers[0].price === 32 && db.signals[0].p_auto_ok === false, 'radar sem API: preço do texto, marcado como declarado e nunca aprova sozinho');
+  ok(db.offers[0].title === 'Água Micelar Neutrogena 200ml' && db.offers[0].image_url === 'https://m.media-amazon.com/img.jpg', 'radar sem API: nome e imagem vêm da página pública do produto');
+  ok(db.coupons && db.coupons[0] && db.coupons[0].p_code === 'PROMO10', 'radar sem API: grava o cupom da mensagem');
+  db.connectors.amazon = { mode: 'manual_only', config: {} };
+  oo = await runMsg(amzMsg()); ok(oo.r[0] === 'ineligible' && /tag/.test(db.captured[0].reason), 'radar sem API: sem tag própria não cria oferta');
+  ctx.http = realHttp; db.connectors.amazon = { mode: 'disabled', config: {} };
+}
+{ // Mercado Livre: página "social" do meli.la traz o produto em destaque
+  const savedConn = { shopee: db.connectors.shopee, mercadolivre: db.connectors.mercadolivre };
+  const html = '<html><meta name="title" content="Whey Protein Growth 1kg | Mercado Livre Brasil"/><meta property="og:image" content="https://http2.mlstatic.com/D_1-P.webp"/>'
+    + '<script>x={"metadata":{"id":"MLB5473798851","product_id":"MLB18953093","user_product_id":"MLBU1","pid":"MLBP1","url":"www.mercadolivre.com.br\\u002Fwhey-protein-growth-1kg\\u002Fp\\u002FMLB18953093","url_fragments":"#a=b"}},{"metadata":{"id":"MLB999","product_id":"MLB888","url":"www.mercadolivre.com.br\\u002Foutro\\u002Fp\\u002FMLB888"}}</script></html>';
+  const p = W.mlSocialProduct(html);
+  ok(p && p.item === 'MLB5473798851' && p.product === 'MLB18953093' && p.url === 'https://www.mercadolivre.com.br/whey-protein-growth-1kg/p/MLB18953093' && p.title === 'Whey Protein Growth 1kg' && /D_1-P/.test(p.image), 'ml: lê o produto em destaque da página social (o primeiro, não os recomendados)');
+  ok(W.identifyProduct(p.url)?.external_id === 'MLB18953093', 'ml: o endereço limpo do produto é reconhecido');
+  ok(W.mlSocialProduct('<html>nada</html>') === null, 'ml: página sem produto devolve nada');
+  db.connectors.mercadolivre = { mode: 'manual_only', config: { link_template: '{url}?matt_tool=111&matt_word=eu' } };
+  const rtm = JSON.parse(JSON.stringify(await rpc('get_integration_runtime', {})));
+  db.captured = []; db.offers = []; db.sources = []; db.signals = [];
+  const r2 = await W.processRadarMessage({ ...ctx, resolveStub: true, rpc: async (n, a) => (n === 'link_cache_get' ? { final_url: p.url, platform: 'mercadolivre', external_id: 'MLB18953093' } : ctx.rpc(n, a)) }, rtm, mkMsg('ISSO AQUI\nWhey Protein Growth Concentrado 1kg\npor 171,00 à vista\nhttps://meli.la/1GZgn24'), { created: {} });
+  ok(r2[0] === 'created' && db.offers[0].affiliate_url === 'https://www.mercadolivre.com.br/whey-protein-growth-1kg/p/MLB18953093?matt_tool=111&matt_word=eu' && db.offers[0].price === 171, 'ml sem API: monta o SEU link (matt_tool) no endereço do produto');
+  db.connectors.mercadolivre = savedConn.mercadolivre;
+  // Shopee sem API: link curto de terceiros resolve o produto; o link de afiliado sai do SEU modelo
+  db.connectors.shopee = { mode: 'manual_only', config: { link_template: '{url}?utm_source=an_ME&mmp_pid=an_ME' } };
+  let so = await runMsg(mkMsg('COOKTOP COM CUPOMZÃO\nCooktop De Indução 4 Bocas Dako Supreme\nDe: R$ 1.506,32\nPOR: R$ 1.109,99\n' + shortSrv.url + '/s1'));
+  ok(so.r[0] === 'created' && db.offers[0].affiliate_url === 'https://shopee.com.br/product/9/55?utm_source=an_ME&mmp_pid=an_ME' && db.offers[0].price === 1109.99 && db.offers[0].title === 'Cooktop De Indução 4 Bocas Dako Supreme', 'shopee sem API: produto vem do link do grupo, o link de afiliado é o SEU');
+  db.connectors.shopee = { mode: 'manual_only', config: {} };
+  so = await runMsg(mkMsg('Cooktop De Indução 4 Bocas Dako\nPOR: R$ 1.109,99\n' + shortSrv.url + '/s1')); ok(so.r[0] === 'ineligible' && /modelo do seu link/.test(db.captured[0].reason), 'shopee sem API: sem o seu modelo de link não cria oferta');
+  db.connectors.shopee = savedConn.shopee;
+}
+
 o = await runMsg(mkMsg(shortSrv.url + '/s1', { created_last_hour: 20 })); ok(o.r[0] === 'filtered' && /Limite por hora/.test(db.captured[0].reason), 'radar: limite por hora da fonte é respeitado');
 db.connectors.shopee.mode = 'disabled'; o = await runMsg(mkMsg(shortSrv.url + '/s1')); ok(o.r[0] === 'ineligible' && /desligado/.test(db.captured[0].reason), 'radar: conector desligado não gera oferta'); db.connectors.shopee.mode = 'api_ready';
 o = await runMsg(mkMsg(shortSrv.url + '/s1')); db.offers.push({ ...db.offers[0] }); // simula a mesma oferta já na fila
